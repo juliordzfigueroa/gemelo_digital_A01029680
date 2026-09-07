@@ -1,1 +1,1 @@
-# gemelo_digital_A01029680
+"# Gemelo Digital Aulas 3 - Doctorado`n`nPrototipo tecnico: modelo GRU para prediccion de variables ambientales.`n`nAlumno: Julio Cesar Rodriguez Figueroa (A01029680)" | Out-File -Encoding utf8 README.md
