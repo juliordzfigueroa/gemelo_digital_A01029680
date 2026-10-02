@@ -28,7 +28,7 @@ lo único que cambia es el argumento `--datos`.
 
 ## Requisitos
 
-- **Python 3.12** (desarrollado con 3.12.10)
+- **Python 3.10 a 3.14.** Desarrollado y verificado con 3.12.10
 - Git
 - GPU NVIDIA con CUDA (opcional; todo corre en CPU, solo más lento)
 
@@ -38,31 +38,92 @@ lo único que cambia es el argumento `--datos`.
 
 Para una máquina donde el repositorio nunca se ha clonado.
 
-### 1. Clonar el repositorio
+### 1. Instalar Python
+
+Descarga el instalador de Windows desde
+[python.org/downloads](https://www.python.org/downloads/windows/).
+
+En la primera pantalla del instalador, **marca la casilla
+`Add python.exe to PATH`** antes de darle a instalar. Es la causa más común de
+que después `python` no se encuentre en la terminal, y corregirlo luego es más
+molesto que marcarla a tiempo. Deja también activado el `py launcher`, que viene
+marcado por omisión y es lo que permite tener varias versiones conviviendo.
+
+Comprueba que quedó, en una terminal nueva:
+
+```powershell
+py --list
+python --version
+```
+
+`py --list` muestra todas las versiones instaladas. Si abriste la terminal antes
+de instalar, ciérrala y abre otra: el `PATH` se lee al arrancar.
+
+**Sobre la versión.** Este proyecto se desarrolló y se verificó con 3.12.10,
+pero **3.14 también sirve**: PyTorch 2.11 soporta Python 3.10 a 3.14 en Windows,
+y CUDA 12.8 —el `cu128` del paso 6— está en su lista de versiones estables.
+
+Si alguna dependencia se queja de que no hay *wheel* para tu versión e intenta
+compilar desde el código fuente, no pelees con eso en Windows: instala 3.12
+junto a la que ya tienes y crea el entorno con ella. Las versiones de Python
+conviven sin estorbarse, y el paso 4 explica cómo elegir cuál se usa.
+
+> Referencia: [matriz de compatibilidad de PyTorch](https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix)
+
+### 2. Elegir dónde va a vivir el repositorio
+
+Muévete a la carpeta donde lo quieras antes de clonar, porque `git clone` crea
+la carpeta del proyecto **dentro de donde estés parado**.
+
+| Qué quieres | Comando |
+|---|---|
+| Ver en qué carpeta estás | `pwd` |
+| Listar lo que hay ahí | `ls` |
+| Entrar a una carpeta | `cd Proyectos` |
+| Subir un nivel | `cd ..` |
+| **Cambiar de disco** | `cd D:\` |
+| Cambiar de disco y carpeta de una vez | `cd D:\Proyectos\Tec` |
+| Ver qué discos existen | `Get-PSDrive -PSProvider FileSystem` |
+
+**En PowerShell, `cd D:\Proyectos` cambia de disco y de carpeta en un solo
+paso.** Esto es distinto de `cmd`, donde `cd` no cambia de unidad y hay que usar
+`cd /d D:\Proyectos` o escribir `D:` solo en una línea. Si alguna vez te topaste
+con que `cd` "no hacía nada" al cambiar de disco, era `cmd`, no PowerShell.
+
+Si la ruta tiene espacios, va entre comillas: `cd "D:\Mis Proyectos"`.
+
+### 3. Clonar el repositorio
 
 ```powershell
 git clone git@github.com:juliordzfigueroa/gemelo_digital_A01029680.git
 cd gemelo_digital_A01029680
 ```
 
-Con HTTPS en lugar de SSH:
-`git clone https://github.com/juliordzfigueroa/gemelo_digital_A01029680.git`
+Con HTTPS en lugar de SSH, si esa máquina no tiene llave configurada:
+
+```powershell
+git clone https://github.com/juliordzfigueroa/gemelo_digital_A01029680.git
+```
 
 Las carpetas `data/raw/`, `data/processed/` y `models/` ya vienen en el clon
 —vacías, con un `.gitkeep`— así que no hay que crearlas a mano. Su contenido no
 se versiona.
 
-### 2. Crear el entorno virtual
+### 4. Crear el entorno virtual
 
 ```powershell
 py -3.12 -m venv .venv
 ```
 
-El `.venv` vive dentro del repositorio pero está en `.gitignore`, así que nunca
-se sube. Si el lanzador `py` no existe en esa máquina, sirve igual
-`python -m venv .venv`, siempre que `python --version` reporte 3.12.
+El `-3.12` elige explícitamente esa versión de entre las que tengas instaladas.
+Para usar la más reciente, `py -m venv .venv`; para 3.14 en concreto,
+`py -3.14 -m venv .venv`. Con `py --list` ves cuáles hay.
 
-### 3. Activar el entorno
+El `.venv` vive dentro del repositorio pero está en `.gitignore`, así que nunca
+se sube. Si algo sale mal en los pasos siguientes, se puede borrar la carpeta
+`.venv` y volver a empezar desde aquí sin tocar nada más.
+
+### 5. Activar el entorno
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -85,7 +146,7 @@ permanente, esto lo habilita solo para tu usuario y solo para scripts locales:
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-### 4. Instalar las dependencias
+### 6. Instalar las dependencias
 
 Con el entorno ya activado:
 
@@ -95,10 +156,10 @@ pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install pandas numpy scikit-learn statsmodels matplotlib pyarrow
 ```
 
-**Cuidado con `cu128`.** Ese índice corresponde al driver de la máquina donde se
-desarrolló; en otra computadora puede no ser el correcto. `nvidia-smi` reporta
-en la esquina superior derecha la versión de CUDA que soporta el driver
-instalado, y con ese número se elige el índice en
+**Cuidado con `cu128`.** Ese índice corresponde a CUDA 12.8, que es lo que
+soporta el driver de la máquina donde se desarrolló; en otra computadora puede no
+ser el correcto. `nvidia-smi` reporta en la esquina superior derecha la versión
+de CUDA que soporta el driver instalado, y con ese número se elige el índice en
 [pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/).
 
 **Si la máquina no tiene GPU NVIDIA**, omite el `--index-url` por completo:
@@ -124,7 +185,7 @@ exacto:
 | `pyarrow` | 25.0.1 | Leer y escribir Parquet |
 | `matplotlib` | 3.11.2 | Gráficas |
 
-### 5. Comprobar que quedó bien
+### 7. Comprobar que quedó bien
 
 ```powershell
 python check_gpu.py
@@ -271,9 +332,12 @@ python -m gru.entrenar --datos ../data/raw/aulas3.parquet
 
 | Síntoma | Qué hacer |
 |---|---|
+| `python` no se reconoce | No marcaste `Add python.exe to PATH`, o no reabriste la terminal. Prueba `py --version` |
 | `ModuleNotFoundError` | Estás fuera de `src/`. Los comandos van con `python -m` desde ahí |
 | El prompt no dice `(.venv)` | No activaste el entorno. Vuelve al paso 1 |
-| `running scripts is disabled` | PowerShell bloquea scripts. Ve a **Instalación desde cero**, paso 3 |
+| `running scripts is disabled` | PowerShell bloquea scripts. Ve a **Instalación desde cero**, paso 5 |
+| `cd` no cambia de disco | Estás en `cmd`, no en PowerShell. Usa `cd /d D:\ruta` o abre PowerShell |
+| `No matching distribution found for torch` | Tu versión de Python queda fuera del rango 3.10–3.14. Instala 3.12 y crea el entorno con `py -3.12` |
 | `CUDA NO disponible` | Normal si instalaste la build de CPU. Si esperabas GPU, revisa que el índice `cuXXX` corresponda a tu driver |
 | Tarda demasiado | Te faltó `--implementacion pytorch` |
 | SARIMAX no termina | Usaste `--estacionalidad estacional`. Quítalo |
