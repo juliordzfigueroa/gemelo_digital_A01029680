@@ -10,6 +10,12 @@ Usage:
     python entrenar.py --datos ruta.parquet # once real readings exist
     python entrenar.py --prueba-sintetica   # quick implementation check
 
+Author:
+    Julio César Rodríguez Figueroa (A01029680)
+
+Last modified:
+    2026-10-01 - Replaced float(loss) with .item() to silence the autograd warning.
+
 Reference:
     Sections 4.2.6 and 5.5 of the research document.
 """

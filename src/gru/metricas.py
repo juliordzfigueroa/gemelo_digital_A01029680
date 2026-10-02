@@ -12,6 +12,12 @@ that a percentage derived from half the sample is never passed off as global.
 For those variables the interpretable metric is MAE in physical units, or
 sMAPE, which is symmetric and does not blow up at zero.
 
+Author:
+    Julio César Rodríguez Figueroa (A01029680)
+
+Last modified:
+    2026-10-01 - Fixed MAPE to use a scale-relative zero threshold.
+
 Reference:
     Section 4.2.6 of the research document.
     Hyndman, R. J., & Koehler, A. B. (2006). Another look at measures of

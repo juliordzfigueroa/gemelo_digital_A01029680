@@ -17,6 +17,12 @@ Usage:
     python sintetico.py            # writes data/raw/sintetico.parquet
     python sintetico.py --dias 90
 
+Author:
+    Julio César Rodríguez Figueroa (A01029680)
+
+Last modified:
+    2026-10-01 - Recalibrated the CO2 build-up rate and the PIR activation curve.
+
 Reference:
     docs/hallazgos_robod.md, for where each of these defects was observed.
 """

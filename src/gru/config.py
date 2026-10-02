@@ -6,6 +6,12 @@ and no anomaly thresholds: every value derived from data is computed from the
 training split and stored next to the trained model, so that the same code
 produces Aulas 3 parameters once the real sensors are deployed.
 
+Author:
+    Julio César Rodríguez Figueroa (A01029680)
+
+Last modified:
+    2026-10-01 - Applied the project documentation standard.
+
 Reference:
     Section 4.2.6 of the research document.
     Sabiri, Y., Houmaidi, W., Bougrine, A., & El Mansour Billah, S. (2025).

@@ -14,6 +14,12 @@ Responsibilities, in order:
 Steps 3 and 4 are where the most common leakage in time-series pipelines
 creeps in, so both are deliberately explicit here.
 
+Author:
+    Julio César Rodríguez Figueroa (A01029680)
+
+Last modified:
+    2026-10-01 - Applied the project documentation standard.
+
 Reference:
     Section 4.2.6 of the research document.
 """
