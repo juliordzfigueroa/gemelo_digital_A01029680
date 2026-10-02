@@ -1,0 +1,38 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Datos (no versionar datasets pesados)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Modelos entrenados (pesados)
+models/*
+!models/.gitkeep
+*.pt
+*.pth
+*.pkl
+*.h5
+
+# Notebooks - checkpoints
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# Secretos / credenciales (importante para las creds de la BD del Tec)
+.env
+*.env
+config.local.*
+
+# Sistema
+Thumbs.db
+.DS_Store
