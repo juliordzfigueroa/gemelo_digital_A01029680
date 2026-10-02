@@ -13,37 +13,26 @@ Tensor flow:
       linear  (batch, 6 * n_variables)
     output    (batch, 6, n_variables)   6 steps = 30 minutes
 
-Note on the gate equations. Section 4.2.7.2 of the research document states the
-original formulation of Cho et al. (2014):
+Two interchangeable recurrent implementations live here:
 
-    r_t = sigma(W_r [h_{t-1}, x_t] + b_r)
-    z_t = sigma(W_z [h_{t-1}, x_t] + b_z)
-    h~_t = tanh(W_h [r_t (*) h_{t-1}, x_t] + b_h)
-    h_t = (1 - z_t) (*) h_{t-1} + z_t (*) h~_t
+  "cho"     GRUCell, which writes out equations 1 to 4 of section 4.2.7.2
+            literally, in the order the research document states them. This is
+            the default, so that the equations published in the thesis are the
+            equations that produce the reported results.
+  "pytorch" nn.GRU, which is the cuDNN variant: roughly 15x faster but not the
+            same formulation (see GRUCell for the two differences).
 
-PyTorch's nn.GRU implements the cuDNN variant, which differs in two ways:
-
-  1. The reset gate is applied AFTER the linear transform of the hidden state,
-     not before it:  n_t = tanh(W_in x_t + b_in + r_t (*) (W_hn h_{t-1} + b_hn))
-     The document applies r_t to h_{t-1} and then multiplies by W_h. These are
-     genuinely different operations, though both are called GRU and perform
-     comparably in practice.
-  2. The update gate has the opposite sense: PyTorch computes
-     h_t = (1 - z_t) (*) n_t + z_t (*) h_{t-1}, so its z_t is "how much of the
-     old state to keep" while the document's z_t is "how much of the new state
-     to take". This is only a sign convention; the network learns either way.
-
-Both differences are worth a footnote in the thesis, since the equations as
-written do not match the library that produces the results.
+Both reach equivalent accuracy. compare_implementations.py trains them side
+by side and prints the comparison.
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Documented how the PyTorch gate equations differ from section 4.2.7.2.
+    2026-10-01 - Added GRUCell, the literal implementation of equations 1-4.
 
 Reference:
-    Section 4.2.6 and 4.2.7.2 of the research document.
+    Sections 4.2.6 and 4.2.7.2 of the research document.
     Cho, K., van Merrienboer, B., Gulcehre, C., Bahdanau, D., Bougares, F.,
     Schwenk, H., & Bengio, Y. (2014). Learning phrase representations using RNN
     encoder-decoder for statistical machine translation. arXiv:1406.1078.
@@ -51,10 +40,141 @@ Reference:
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
 import config as cfg
+
+
+class GRUCell(nn.Module):
+    """One GRU cell written exactly as equations 1 to 4 of section 4.2.7.2.
+
+    The four equations, in the document's own notation:
+
+        (1)  r_t  = sigma(W_r [h_{t-1}, x_t] + b_r)
+        (2)  z_t  = sigma(W_z [h_{t-1}, x_t] + b_z)
+        (3)  h~_t = tanh(W_h [r_t (*) h_{t-1}, x_t] + b_h)
+        (4)  h_t  = (1 - z_t) (*) h_{t-1} + z_t (*) h~_t
+
+    where (*) is the Hadamard product and [a, b] is concatenation.
+
+    This differs from PyTorch's nn.GRU in two ways, which is the reason this
+    class exists:
+
+      1. Equation 3 multiplies r_t by h_{t-1} and only then applies W_h.
+         nn.GRU computes r_t (*) (W_hn h_{t-1} + b_hn), applying the linear
+         transform first and the reset gate afterwards. Those are genuinely
+         different operations.
+      2. Equation 4 treats z_t as "how much of the new state to take". nn.GRU
+         treats its z_t as "how much of the old state to keep". That one is
+         only a sign convention.
+
+    The cost of the literal version is speed: a Python loop over timesteps
+    cannot use the fused cuDNN kernel, which makes it about 15x slower. On this
+    dataset that is roughly 8 minutes of training instead of 33 seconds, which
+    is a worthwhile trade for having the documented equations be the ones that
+    actually run.
+
+    Reference:
+        Section 4.2.7.2 of the research document.
+        Cho et al. (2014). arXiv:1406.1078.
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int) -> None:
+        """Create the three gate transforms.
+
+        Args:
+            input_dim: Width of x_t.
+            hidden_dim: Width of h_t, which is the number of hidden units.
+        """
+        super().__init__()
+        self.hidden_dim = hidden_dim
+
+        # Each gate takes the concatenation [h_{t-1}, x_t], so its input width
+        # is the sum of both. One nn.Linear per gate carries both the weight
+        # matrix W and the bias vector b of the equation.
+        concat_dim = hidden_dim + input_dim
+        self.W_r = nn.Linear(concat_dim, hidden_dim)  # equation 1
+        self.W_z = nn.Linear(concat_dim, hidden_dim)  # equation 2
+        self.W_h = nn.Linear(concat_dim, hidden_dim)  # equation 3
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        """Initialize weights the same way nn.GRU does.
+
+        Uniform in [-1/sqrt(hidden), 1/sqrt(hidden)]. Matching PyTorch's scheme
+        is what makes the comparison between the two implementations fair: a
+        difference in results should come from the formulation, not from a
+        different starting point.
+        """
+        limit = 1.0 / math.sqrt(self.hidden_dim)
+        for parameter in self.parameters():
+            nn.init.uniform_(parameter, -limit, limit)
+
+    def forward(self, x_t: torch.Tensor, h_prev: torch.Tensor) -> torch.Tensor:
+        """Advance the hidden state by one timestep.
+
+        Args:
+            x_t: Input at time t, shaped (batch, input_dim).
+            h_prev: Hidden state h_{t-1}, shaped (batch, hidden_dim).
+
+        Returns:
+            The new hidden state h_t, shaped (batch, hidden_dim).
+        """
+        concatenated = torch.cat([h_prev, x_t], dim=-1)
+
+        r = torch.sigmoid(self.W_r(concatenated))  # (1) what of the past to drop
+        z = torch.sigmoid(self.W_z(concatenated))  # (2) how much to replace
+
+        # (3) the reset gate filters h_{t-1} BEFORE the linear transform, which
+        # is the difference from nn.GRU described in the class docstring.
+        candidate = torch.tanh(self.W_h(torch.cat([r * h_prev, x_t], dim=-1)))
+
+        return (1 - z) * h_prev + z * candidate  # (4) blend old and new
+
+
+class GRULayer(nn.Module):
+    """Run a GRUCell across a whole sequence.
+
+    Mirrors the call signature of nn.GRU so the two implementations are
+    interchangeable in EnvironmentalGRU without touching anything downstream.
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int) -> None:
+        """Create the layer.
+
+        Args:
+            input_dim: Width of each input step.
+            hidden_dim: Number of hidden units.
+        """
+        super().__init__()
+        self.cell = GRUCell(input_dim, hidden_dim)
+        self.hidden_dim = hidden_dim
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Process every timestep in order.
+
+        Args:
+            x: Input sequence, shaped (batch, pasos, input_dim).
+
+        Returns:
+            A tuple of (all hidden states shaped (batch, pasos, hidden_dim),
+            final hidden state shaped (1, batch, hidden_dim)). The second
+            element carries the extra leading axis so the shape matches what
+            nn.GRU returns.
+        """
+        batch, steps, _ = x.shape
+        h = x.new_zeros(batch, self.hidden_dim)
+
+        states = []
+        for t in range(steps):
+            h = self.cell(x[:, t, :], h)
+            states.append(h)
+
+        return torch.stack(states, dim=1), h.unsqueeze(0)
 
 
 class EnvironmentalGRU(nn.Module):
@@ -69,6 +189,7 @@ class EnvironmentalGRU(nn.Module):
         dropout: float = cfg.DROPOUT,
         embedding_dim: int = cfg.SPACE_EMBEDDING_DIM,
         output_steps: int = cfg.OUTPUT_STEPS,
+        implementation: str = cfg.GRU_IMPLEMENTATION,
     ) -> None:
         """Build the network.
 
@@ -82,17 +203,25 @@ class EnvironmentalGRU(nn.Module):
             dropout: Dropout probability applied between the two GRU layers.
             embedding_dim: Width of the space-id embedding.
             output_steps: How many future steps the head emits per call.
+            implementacion: "cho" for the literal equations of section 4.2.7.2,
+                "pytorch" for the faster cuDNN variant.
 
         Raises:
-            ValueError: If unidades does not hold exactly two values.
+            ValueError: If unidades does not hold exactly two values, or if
+                implementacion is not one of the two accepted names.
         """
         super().__init__()
         units = units or cfg.HIDDEN_UNITS
         if len(units) != 2:
             raise ValueError(f"expected 2 layers, got {len(units)}")
+        if implementation not in ("cho", "pytorch"):
+            raise ValueError(
+                f"implementacion must be 'cho' or 'pytorch', got {implementation!r}"
+            )
 
         self.n_variables = n_variables
         self.output_steps = output_steps
+        self.implementation = implementation
 
         # The space id is categorical, not ordinal: room 3302 is not "more"
         # than room 3301, so it cannot enter as a number. The embedding learns
@@ -104,11 +233,15 @@ class EnvironmentalGRU(nn.Module):
 
         input_dim = n_continuous_features + embedding_dim
 
-        # Two separate nn.GRU modules instead of one with num_layers=2: PyTorch
-        # forces every layer inside a single nn.GRU to share hidden_size, and
-        # the specification asks for [128, 64].
-        self.gru1 = nn.GRU(input_dim, units[0], batch_first=True)
-        self.gru2 = nn.GRU(units[0], units[1], batch_first=True)
+        if implementation == "cho":
+            self.gru1 = GRULayer(input_dim, units[0])
+            self.gru2 = GRULayer(units[0], units[1])
+        else:
+            # Two separate nn.GRU modules instead of one with num_layers=2:
+            # PyTorch forces every layer inside a single nn.GRU to share
+            # hidden_size, and the specification asks for [128, 64].
+            self.gru1 = nn.GRU(input_dim, units[0], batch_first=True)
+            self.gru2 = nn.GRU(units[0], units[1], batch_first=True)
 
         # Explicit dropout module. The `dropout` argument of nn.GRU only acts
         # between internal layers, so with separate modules it would never fire.
@@ -165,12 +298,17 @@ class EnvironmentalGRU(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
-def build(n_spaces: int, n_continuous_features: int) -> EnvironmentalGRU:
+def build(
+    n_spaces: int,
+    n_continuous_features: int,
+    implementation: str = cfg.GRU_IMPLEMENTATION,
+) -> EnvironmentalGRU:
     """Instantiate the network with the project configuration.
 
     Args:
         n_spaces: Number of distinct spaces in the dataset.
         n_continuous_features: Number of continuous input columns.
+        implementacion: "cho" or "pytorch".
 
     Returns:
         An untrained EnvironmentalGRU sized from config.py.
@@ -179,4 +317,5 @@ def build(n_spaces: int, n_continuous_features: int) -> EnvironmentalGRU:
         n_variables=len(cfg.ACTIVE_VARIABLES),
         n_continuous_features=n_continuous_features,
         n_spaces=n_spaces,
+        implementation=implementation,
     )

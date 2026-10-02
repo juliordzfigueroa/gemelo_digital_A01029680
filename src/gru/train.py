@@ -14,7 +14,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Replaced float(loss) with .item() to silence the autograd warning.
+    2026-10-01 - Added the --implementation flag to pick the recurrent variant.
 
 Reference:
     Sections 4.2.6 and 5.5 of the research document.
@@ -146,6 +146,7 @@ def train(
     epochs: int = cfg.MAX_EPOCHS,
     patience: int = cfg.PATIENCE,
     quiet: bool = False,
+    implementation: str = cfg.GRU_IMPLEMENTATION,
 ) -> dict:
     """Train the network and evaluate it on the test split.
 
@@ -155,6 +156,8 @@ def train(
         epocas: Maximum number of epochs.
         paciencia: Epochs without validation improvement before stopping.
         silencioso: Suppress progress output.
+        implementacion: "cho" for the literal equations of section 4.2.7.2,
+            "pytorch" for the faster cuDNN variant.
 
     Returns:
         A dict holding the trained network, its normalizer, the training
@@ -192,10 +195,13 @@ def train(
         )
 
     net = mod.build(
-        n_spaces=len(space_index), n_continuous_features=len(columns)
+        n_spaces=len(space_index),
+        n_continuous_features=len(columns),
+        implementation=implementation,
     ).to(dev)
     if not quiet:
-        print(f"\nParametros entrenables: {net.n_parameters():,}")
+        print(f"\nImplementacion recurrente: {implementation}")
+        print(f"Parametros entrenables: {net.n_parameters():,}")
 
     # MSE because this is regression over continuous values with no activation
     # on the output layer: the standard pairing from Table 1, section 5.3.
@@ -271,6 +277,7 @@ def train(
         "seconds": duration,
         "results": results,
         "horizon": met.by_horizon(real, pred),
+        "implementation": implementation,
     }
 
 
@@ -294,6 +301,8 @@ def save(output: dict, folder: Path = cfg.MODELS, label: str = "gru") -> None:
         "output_steps": cfg.OUTPUT_STEPS,
         "hidden_units": cfg.HIDDEN_UNITS,
         "dropout": cfg.DROPOUT,
+        "implementation": output["implementation"],
+        "training_seconds": round(output["seconds"], 1),
         "best_epoch": output["best_epoch"],
         "best_val_loss": output["best_val_loss"],
         "test_metrics": output["results"],
@@ -365,6 +374,12 @@ def main() -> int:
         action="store_true",
         help="fit mean and sigma per space instead of globally",
     )
+    parser.add_argument(
+        "--implementation",
+        choices=("cho", "pytorch"),
+        default=cfg.GRU_IMPLEMENTATION,
+        help="'cho' writes out equations 1-4; 'pytorch' uses the cuDNN variant",
+    )
     parser.add_argument("--label", default="gru")
     parser.add_argument(
         "--known-series-test",
@@ -391,6 +406,7 @@ def main() -> int:
         by_space=args.normalize_by_space,
         epochs=args.epochs,
         patience=args.patience,
+        implementation=args.implementation,
     )
     met.print_report(output["results"], "Conjunto de prueba")
 
