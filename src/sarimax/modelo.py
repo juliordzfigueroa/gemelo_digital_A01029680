@@ -20,7 +20,7 @@ is a single global model.
 On seasonality. Section 4.2.7.1 states a seasonal period of s=288, which is one
 day at 5-minute sampling. That is correct in principle and intractable in
 practice: the state-space representation grows with s, so a seasonal term of
-288 drags a 289-dimensional state through every Kalman step. Measured on one
+288 drags a 289-dimensional state through every Kalman step. Measured on the
 project data, that is 2147 seconds for a single model against 0.82 seconds for
 the Fourier alternative, a factor of 2600, and 25 models are needed.
 
