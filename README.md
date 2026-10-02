@@ -50,11 +50,11 @@ PyTorch se instala con el índice de CUDA correspondiente; en esta máquina es
 
 ## Cómo correrlo
 
-Todos los comandos se ejecutan **desde `src/gru`**, porque los módulos se
-importan como hermanos.
+Todos los comandos se ejecutan **desde `src/`**, con `python -m`, porque las
+carpetas son paquetes de Python.
 
 ```bash
-cd src/gru
+cd src
 ```
 
 ### Verificación (~2.5 min)
@@ -63,13 +63,13 @@ Confirma que la red aprende una serie limpia cuya respuesta se conoce. Si falla,
 el problema está en el código y no en los datos.
 
 ```bash
-../../.venv/Scripts/python.exe entrenar.py --prueba-sintetica
+../.venv/Scripts/python.exe -m gru.entrenar --prueba-sintetica
 ```
 
 ### Entrenamiento completo (~30 min en RTX 4090)
 
 ```bash
-../../.venv/Scripts/python.exe entrenar.py --dias 60
+../.venv/Scripts/python.exe -m gru.entrenar --dias 60
 ```
 
 Con `--implementacion pytorch` baja a unos 2 minutos, útil mientras iteras. La
@@ -81,25 +81,38 @@ normalización (`gru_normalizador.json`) y las métricas de la corrida
 (`gru_metadatos.json`). **Los tres son necesarios**: sin el normalizador, las
 salidas del modelo no se pueden convertir a ppm ni a grados.
 
+### Baseline SARIMAX y comparación
+
+```bash
+../.venv/Scripts/python.exe -m sarimax.entrenar          # solo el baseline
+../.venv/Scripts/python.exe comparar_modelos.py          # GRU contra SARIMAX
+```
+
+Los dos modelos se entrenan por separado y con criterios distintos: el GRU
+minimiza MSE por backpropagation, SARIMAX maximiza verosimilitud por filtro de
+Kalman. Ninguno alimenta al otro. Lo que comparten es el conjunto de prueba, las
+particiones, las ventanas y el código de métricas, y eso es lo que hace
+comparables los números.
+
 ### Comparar las dos implementaciones recurrentes
 
 Entrena la celda escrita a mano y la de PyTorch con la misma semilla y los
 mismos datos, y verifica que lleguen a métricas equivalentes.
 
 ```bash
-../../.venv/Scripts/python.exe comparar_implementaciones.py
+../.venv/Scripts/python.exe -m gru.comparar_implementaciones
 ```
 
 ### Generar solo los datos
 
 ```bash
-../../.venv/Scripts/python.exe sintetico.py --dias 60
+../.venv/Scripts/python.exe -m comun.sintetico --dias 60
 ```
 
 ### Con datos reales, cuando existan
 
 ```bash
-../../.venv/Scripts/python.exe entrenar.py --datos ../../data/raw/aulas3.parquet
+../.venv/Scripts/python.exe -m gru.entrenar --datos ../data/raw/aulas3.parquet
 ```
 
 ### Opciones útiles
@@ -137,7 +150,10 @@ cuando un nodo pierde la red.
 ## Estructura
 
 ```
+src/comun/        contrato de datos, ventanas, normalización, métricas
 src/gru/          modelo predictivo (ver src/gru/README.md)
+src/sarimax/      baseline estadístico
+src/comparar_modelos.py   GRU contra SARIMAX sobre las mismas ventanas
 docs/             guía de demo, estándar de código, hallazgos de ROBOD
 data/raw/         datos de entrada (no versionados)
 data/processed/   datos derivados (no versionados)
@@ -145,8 +161,8 @@ models/           pesos y metadatos (no versionados)
 check_gpu.py      diagnóstico de CUDA
 ```
 
-Pendientes: `src/sarimax/` (baseline), `src/anomalias/` (detector 3σ),
-`src/llm/` (Llama 3.1) y `src/api/` (FastAPI).
+Pendientes: `src/anomalias/` (detector 3σ), `src/llm/` (Llama 3.1) y
+`src/api/` (FastAPI).
 
 ---
 

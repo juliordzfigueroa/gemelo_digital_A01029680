@@ -45,7 +45,7 @@ import math
 import torch
 from torch import nn
 
-import config as cfg
+from comun import config as cfg
 
 
 class CeldaGRU(nn.Module):

@@ -13,9 +13,9 @@ Both runs share the seed, the splits and the normalizer, so any difference in
 the metrics comes from the formulation and not from the data or the
 initialization scale.
 
-Usage:
-    python comparar_implementaciones.py
-    python comparar_implementaciones.py --dias 60
+Usage, from the src/ directory:
+    python -m gru.comparar_implementaciones
+    python -m gru.comparar_implementaciones --dias 60
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
@@ -32,9 +32,9 @@ from __future__ import annotations
 import argparse
 import json
 
-import config as cfg
-import entrenar as ent
-import sintetico
+from comun import config as cfg
+from gru import entrenar as ent
+from comun import sintetico
 
 
 def comparar(dias: int, espacios: int, epocas: int, paciencia: int) -> dict:

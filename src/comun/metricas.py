@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import numpy as np
 
-import config as cfg
+from comun import config as cfg
 
 # Absolute floor below which a value counts as zero.
 EPSILON_MAPE = 1e-6
