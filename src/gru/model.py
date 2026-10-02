@@ -36,6 +36,12 @@ PyTorch's nn.GRU implements the cuDNN variant, which differs in two ways:
 Both differences are worth a footnote in the thesis, since the equations as
 written do not match the library that produces the results.
 
+Author:
+    Julio César Rodríguez Figueroa (A01029680)
+
+Last modified:
+    2026-10-01 - Documented how the PyTorch gate equations differ from section 4.2.7.2.
+
 Reference:
     Section 4.2.6 and 4.2.7.2 of the research document.
     Cho, K., van Merrienboer, B., Gulcehre, C., Bahdanau, D., Bougares, F.,
