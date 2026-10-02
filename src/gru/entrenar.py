@@ -14,7 +14,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Replaced float(loss) with .item() to silence the autograd warning.
+    2026-10-01 - Added the --implementacion flag to pick the recurrent variant.
 
 Reference:
     Sections 4.2.6 and 5.5 of the research document.
@@ -146,6 +146,7 @@ def entrenar(
     epocas: int = cfg.EPOCAS_MAXIMAS,
     paciencia: int = cfg.PACIENCIA,
     silencioso: bool = False,
+    implementacion: str = cfg.IMPLEMENTACION_GRU,
 ) -> dict:
     """Train the network and evaluate it on the test split.
 
@@ -155,6 +156,8 @@ def entrenar(
         epocas: Maximum number of epochs.
         paciencia: Epochs without validation improvement before stopping.
         silencioso: Suppress progress output.
+        implementacion: "cho" for the literal equations of section 4.2.7.2,
+            "pytorch" for the faster cuDNN variant.
 
     Returns:
         A dict holding the trained network, its normalizer, the training
@@ -192,10 +195,13 @@ def entrenar(
         )
 
     red = mod.construir(
-        n_espacios=len(indice_espacios), n_rasgos_continuos=len(columnas)
+        n_espacios=len(indice_espacios),
+        n_rasgos_continuos=len(columnas),
+        implementacion=implementacion,
     ).to(dev)
     if not silencioso:
-        print(f"\nParametros entrenables: {red.n_parametros():,}")
+        print(f"\nImplementacion recurrente: {implementacion}")
+        print(f"Parametros entrenables: {red.n_parametros():,}")
 
     # MSE because this is regression over continuous values with no activation
     # on the output layer: the standard pairing from Table 1, section 5.3.
@@ -271,6 +277,7 @@ def entrenar(
         "segundos": duracion,
         "resultados": resultados,
         "horizonte": met.por_horizonte(real, pred),
+        "implementacion": implementacion,
     }
 
 
@@ -294,6 +301,8 @@ def guardar(salida: dict, carpeta: Path = cfg.MODELOS, etiqueta: str = "gru") ->
         "pasos_salida": cfg.PASOS_SALIDA,
         "unidades_ocultas": cfg.UNIDADES_OCULTAS,
         "dropout": cfg.DROPOUT,
+        "implementacion": salida["implementacion"],
+        "segundos_entrenamiento": round(salida["segundos"], 1),
         "mejor_epoca": salida["mejor_epoca"],
         "mejor_perdida_val": salida["mejor_perdida_val"],
         "metricas_prueba": salida["resultados"],
@@ -365,6 +374,12 @@ def main() -> int:
         action="store_true",
         help="fit mean and sigma per space instead of globally",
     )
+    parser.add_argument(
+        "--implementacion",
+        choices=("cho", "pytorch"),
+        default=cfg.IMPLEMENTACION_GRU,
+        help="'cho' writes out equations 1-4; 'pytorch' uses the cuDNN variant",
+    )
     parser.add_argument("--etiqueta", default="gru")
     parser.add_argument(
         "--prueba-sintetica",
@@ -391,6 +406,7 @@ def main() -> int:
         por_espacio=args.normalizar_por_espacio,
         epocas=args.epocas,
         paciencia=args.paciencia,
+        implementacion=args.implementacion,
     )
     met.imprimir(salida["resultados"], "Conjunto de prueba")
 

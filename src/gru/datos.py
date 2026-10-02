@@ -416,7 +416,11 @@ class VentanasAmbientales(Dataset):
             self.espacio = torch.empty(0, dtype=torch.long)
 
     def __len__(self) -> int:
-        """Return how many valid windows this partition produced."""
+        """Count the windows this partition produced.
+
+        Returns:
+            Number of valid windows available for training or evaluation.
+        """
         return len(self.X)
 
     def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

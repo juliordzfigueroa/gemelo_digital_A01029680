@@ -14,6 +14,11 @@ capas [128, 64] que predice CO₂, temperatura, humedad, luz y movimiento 30
 minutos hacia adelante a partir de una hora de contexto, con un ID de espacio
 como rasgo para que un solo modelo sirva a todo el edificio.
 
+La celda recurrente está escrita a mano siguiendo las ecuaciones 1 a 4 de la
+sección 4.2.7.2 del documento de investigación, en vez de usar `nn.GRU`, que
+implementa una variante distinta. Así las ecuaciones que publica la tesis son
+las que producen los resultados.
+
 Los sensores de Aulas 3 todavía no existen: se recolectan durante dos meses. El
 pipeline se desarrolla contra **datos sintéticos** generados para tener la
 misma forma y los mismos defectos que tendrán los reales. El día que lleguen,
@@ -52,7 +57,7 @@ importan como hermanos.
 cd src/gru
 ```
 
-### Verificación rápida (~25 s)
+### Verificación (~2.5 min)
 
 Confirma que la red aprende una serie limpia cuya respuesta se conoce. Si falla,
 el problema está en el código y no en los datos.
@@ -61,16 +66,29 @@ el problema está en el código y no en los datos.
 ../../.venv/Scripts/python.exe entrenar.py --prueba-sintetica
 ```
 
-### Entrenamiento completo (~2 min en RTX 4090)
+### Entrenamiento completo (~30 min en RTX 4090)
 
 ```bash
 ../../.venv/Scripts/python.exe entrenar.py --dias 60
 ```
 
+Con `--implementacion pytorch` baja a unos 2 minutos, útil mientras iteras. La
+celda escrita a mano es ~14× más lenta porque un bucle de Python sobre los pasos
+de tiempo no puede usar el kernel fusionado de cuDNN.
+
 Deja en `models/` tres archivos: los pesos (`gru.pt`), los parámetros de
 normalización (`gru_normalizador.json`) y las métricas de la corrida
 (`gru_metadatos.json`). **Los tres son necesarios**: sin el normalizador, las
 salidas del modelo no se pueden convertir a ppm ni a grados.
+
+### Comparar las dos implementaciones recurrentes
+
+Entrena la celda escrita a mano y la de PyTorch con la misma semilla y los
+mismos datos, y verifica que lleguen a métricas equivalentes.
+
+```bash
+../../.venv/Scripts/python.exe comparar_implementaciones.py
+```
 
 ### Generar solo los datos
 
@@ -92,6 +110,7 @@ salidas del modelo no se pueden convertir a ppm ni a grados.
 | `--paciencia N` | Épocas sin mejora antes de detener |
 | `--normalizar-por-espacio` | Media y sigma por espacio en vez de globales |
 | `--etiqueta nombre` | Prefijo de los archivos guardados, para comparar corridas |
+| `--implementacion pytorch` | Usa `nn.GRU` en vez de la celda escrita a mano: ~15× más rápido, útil para iterar |
 
 ---
 

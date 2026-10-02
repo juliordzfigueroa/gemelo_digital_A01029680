@@ -11,17 +11,20 @@ adelante, a partir de 1 hora de contexto.
 | `config.py` | Mapeo de variables, cotas físicas de los sensores, hiperparámetros. **Sin medias ni sigmas**: todo parámetro derivado de datos se calcula y se guarda aparte. |
 | `sintetico.py` | Genera datos de prueba que cumplen el contrato, con los mismos defectos esperados de los sensores reales. |
 | `datos.py` | Bloques contiguos, rejilla regular, partición temporal, normalización y ventanas. |
-| `modelo.py` | La arquitectura. |
+| `modelo.py` | La arquitectura, con las dos implementaciones recurrentes. |
 | `metricas.py` | MAE, RMSE, MAPE, sMAPE, R², por variable y por horizonte. |
 | `entrenar.py` | Loop de entrenamiento con early stopping, evaluación y guardado. |
+| `comparar_implementaciones.py` | Entrena las dos celdas recurrentes con la misma semilla y compara. |
 
 ## Cómo correrlo
 
 ```bash
 cd src/gru
-python entrenar.py --prueba-sintetica    # verificación rápida (~20 s)
-python entrenar.py --dias 60             # entrenamiento completo
-python entrenar.py --datos ../../data/raw/aulas3.parquet
+python entrenar.py --prueba-sintetica                        # verificación
+python entrenar.py --dias 60                                 # entrenamiento
+python entrenar.py --implementacion pytorch --dias 60        # versión rápida
+python entrenar.py --datos ../../data/raw/aulas3.parquet     # datos reales
+python comparar_implementaciones.py                          # cho vs pytorch
 ```
 
 ## El contrato de datos
@@ -57,12 +60,37 @@ salida    (lote, 6, 5)         6 pasos × 5 variables, sin activación
 
 95,662 parámetros entrenables.
 
-Tres decisiones que no son obvias desde el documento:
+### Las dos implementaciones recurrentes
 
-**Dos `nn.GRU` separados, no uno con `num_layers=2`.** PyTorch obliga a que
-todas las capas de un mismo módulo `nn.GRU` compartan `hidden_size`, y la
-especificación pide [128, 64]. Por lo mismo el dropout va como módulo
-explícito: el argumento `dropout` de `nn.GRU` solo actúa entre capas internas.
+`config.IMPLEMENTACION_GRU` elige entre dos celdas con la misma arquitectura:
+
+| Valor | Qué es |
+|---|---|
+| `"cho"` *(por omisión)* | `CeldaGRU`, las ecuaciones 1 a 4 de la sección 4.2.7.2 escritas literalmente. Las ecuaciones que publica la tesis son las que producen los resultados. |
+| `"pytorch"` | `nn.GRU`, la variante fusionada de cuDNN. Unas 15× más rápida, pero no es la misma formulación. |
+
+Las dos diferencias con `nn.GRU`, que son la razón de que `CeldaGRU` exista:
+
+1. **Dónde se aplica el reset.** La ecuación 3 multiplica `r_t ⊙ h_{t-1}` y
+   después aplica `W_h`. `nn.GRU` calcula `r_t ⊙ (W_hn·h_{t-1} + b_hn)`:
+   la transformación lineal primero y el reset después. Son operaciones
+   genuinamente distintas.
+2. **El sentido de la compuerta update.** La ecuación 4 trata `z_t` como
+   "cuánto tomar de lo nuevo"; `nn.GRU` lo trata como "cuánto conservar de lo
+   viejo". Esta sí es solo convención de signo.
+
+`CeldaGRU.reiniciar_parametros()` replica el esquema de inicialización de
+`nn.GRU` — uniforme en ±1/√(unidades) — para que la comparación entre las dos
+sea justa: una diferencia en resultados debe venir de la formulación, no de un
+punto de partida distinto.
+
+Otras dos decisiones que no son obvias desde el documento:
+
+**Las capas van como dos módulos separados.** Con `--implementacion pytorch`
+esto es obligado: PyTorch fuerza a que todas las capas de un mismo `nn.GRU`
+compartan `hidden_size`, y la especificación pide [128, 64]. Por lo mismo el
+dropout va como módulo explícito, porque el argumento `dropout` de `nn.GRU`
+solo actúa entre capas internas.
 
 **El `espacio_id` entra como embedding, no como one-hot.** El salón 3302 no es
 "más" que el 3301, así que no puede entrar como número. Un one-hot crecería con
@@ -110,6 +138,8 @@ global colapsa los espacios oscuros cerca de cero. Falta comparar las dos.
 
 ## Pendiente
 
+- Nota al pie en la tesis sobre la segunda diferencia con `nn.GRU` (el sentido
+  de la compuerta update), por si alguien compara el código con la ecuación 4.
 - Baseline SARIMAX, en `src/sarimax/`, sobre las mismas particiones y métricas.
   Antes hay que resolver lo de la estacionalidad: `s=288` tarda 104 s por modelo
   contra 0.3 s de los términos de Fourier.

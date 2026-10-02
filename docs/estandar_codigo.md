@@ -42,6 +42,9 @@ Estilo Google. El resumen va en una línea, en modo imperativo. Las secciones
 `Args`, `Returns` y `Raises` solo aparecen cuando aplican: una función sin
 argumentos no lleva `Args`, y una que no devuelve nada no lleva `Returns`.
 
+El bloque va **dentro** de la función, justo después de la firma. Es la única
+posición en que Python lo reconoce como docstring.
+
 ```python
 def normalizar(valores: np.ndarray, media: float, sigma: float) -> np.ndarray:
     """Apply z-score normalization to a single variable.
@@ -64,6 +67,13 @@ def normalizar(valores: np.ndarray, media: float, sigma: float) -> np.ndarray:
         Section 4.2.6 of the research document.
     """
 ```
+
+> **Por qué no va arriba del `def`.** Un bloque de triple comilla colocado antes
+> de la definición deja de ser un docstring: Python lo evalúa como una expresión
+> suelta y lo descarta. El código sigue corriendo, pero `funcion.__doc__` queda
+> en `None`, `help(funcion)` sale vacío, los tooltips de VS Code no muestran
+> nada y cualquier generador de documentación produce páginas en blanco. Dentro
+> de la función se conserva todo eso.
 
 ## Comentarios dentro del código
 
