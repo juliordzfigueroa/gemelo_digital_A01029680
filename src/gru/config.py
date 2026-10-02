@@ -10,7 +10,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Applied the project documentation standard.
+    2026-10-01 - Added IMPLEMENTACION_GRU to switch recurrent implementations.
 
 Reference:
     Section 4.2.6 of the research document.
@@ -85,6 +85,19 @@ MAX_PASOS_INTERPOLABLES = 3  # 15 minutes
 # --- Architecture ----------------------------------------------------------
 UNIDADES_OCULTAS = [128, 64]
 DROPOUT = 0.2
+
+# Which recurrent implementation to use.
+#
+#   "cho"     CeldaGRU, equations 1 to 4 of section 4.2.7.2 written literally.
+#             Default, so the equations published in the thesis are the ones
+#             that produce the reported results. About 15x slower, which on
+#             this dataset means minutes rather than seconds.
+#   "pytorch" nn.GRU, the fused cuDNN variant. Faster, but it applies the reset
+#             gate after the linear transform instead of before, so it is not
+#             the formulation the document states.
+#
+# Reference: see modelo.CeldaGRU for the full comparison.
+IMPLEMENTACION_GRU = "cho"
 
 # Width of the space-id embedding. An embedding rather than one-hot because
 # Aulas 3 has many rooms across 5 floors: one-hot grows with the number of
