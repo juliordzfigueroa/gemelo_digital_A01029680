@@ -5,8 +5,10 @@ en **inglés**; los identificadores siguen en español, igual que la tesis.
 
 ## Encabezado de archivo
 
-Toda la primera línea es el título. Después, un párrafo de qué hace y por qué
-existe. Si el archivo implementa algo publicado, va la referencia.
+La primera línea es el título. Después, un párrafo de qué hace y por qué existe.
+Al final, en este orden: autoría, fecha y descripción de la última modificación,
+y la referencia si el archivo implementa algo publicado o una sección del
+documento de investigación.
 
 ```python
 """Short title of the file.
@@ -14,10 +16,25 @@ existe. Si el archivo implementa algo publicado, va la referencia.
 What this module does and why it exists. Enough context that someone opening
 the file cold knows whether this is the file they are looking for.
 
+Author:
+    Julio César Rodríguez Figueroa (A01029680)
+
+Last modified:
+    2026-10-01 - What changed in that edit, in one line.
+
 Reference:
     Author, A. (year). Title. DOI or URL.
 """
 ```
+
+`Last modified` describe **qué** cambió, no solo que cambió: "Fixed MAPE to use
+a scale-relative zero threshold" sirve, "Updated file" no.
+
+> **Advertencia.** Este campo se escribe a mano, así que se desactualiza en
+> cuanto alguien edita el archivo sin acordarse de tocarlo. Git ya lleva ese
+> dato de forma confiable: `git log -1 --format='%ad %s' -- ruta/al/archivo`
+> siempre dice la verdad. El encabezado existe para que el archivo se pueda leer
+> fuera del repositorio, por ejemplo impreso como anexo de la tesis.
 
 ## Docstring de función
 
