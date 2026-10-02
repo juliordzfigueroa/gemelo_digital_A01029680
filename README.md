@@ -28,20 +28,91 @@ lo único que cambia es el argumento `--datos`.
 
 ## Requisitos
 
-- Python con el entorno virtual del repo (`.venv`)
-- GPU NVIDIA con CUDA (opcional; corre en CPU, solo más lento)
+- **Python 3.12** (desarrollado con 3.12.10)
+- Git
+- GPU NVIDIA con CUDA (opcional; todo corre en CPU, solo más lento)
 
-### Dependencias
+---
 
-Solo la primera vez, con el entorno activado:
+## Instalación desde cero
+
+Para una máquina donde el repositorio nunca se ha clonado.
+
+### 1. Clonar el repositorio
 
 ```powershell
+git clone git@github.com:juliordzfigueroa/gemelo_digital_A01029680.git
+cd gemelo_digital_A01029680
+```
+
+Con HTTPS en lugar de SSH:
+`git clone https://github.com/juliordzfigueroa/gemelo_digital_A01029680.git`
+
+Las carpetas `data/raw/`, `data/processed/` y `models/` ya vienen en el clon
+—vacías, con un `.gitkeep`— así que no hay que crearlas a mano. Su contenido no
+se versiona.
+
+### 2. Crear el entorno virtual
+
+```powershell
+py -3.12 -m venv .venv
+```
+
+El `.venv` vive dentro del repositorio pero está en `.gitignore`, así que nunca
+se sube. Si el lanzador `py` no existe en esa máquina, sirve igual
+`python -m venv .venv`, siempre que `python --version` reporte 3.12.
+
+### 3. Activar el entorno
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+| Shell | Comando |
+|---|---|
+| PowerShell | `.\.venv\Scripts\Activate.ps1` |
+| `cmd` | `.venv\Scripts\activate.bat` |
+| Git Bash | `source .venv/Scripts/activate` |
+
+Sabes que funcionó porque aparece `(.venv)` al inicio del prompt.
+
+**Si PowerShell contesta `running scripts is disabled on this system`**, está
+bloqueando la ejecución de scripts. La salida sin tocar nada es activar desde
+`cmd` o Git Bash con los comandos de la tabla. Si prefieres arreglarlo de forma
+permanente, esto lo habilita solo para tu usuario y solo para scripts locales:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+### 4. Instalar las dependencias
+
+Con el entorno ya activado:
+
+```powershell
+python -m pip install --upgrade pip
 pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install pandas numpy scikit-learn statsmodels matplotlib pyarrow
 ```
 
-PyTorch se instala con el índice de CUDA correspondiente; en esta máquina es
-`cu128`.
+**Cuidado con `cu128`.** Ese índice corresponde al driver de la máquina donde se
+desarrolló; en otra computadora puede no ser el correcto. `nvidia-smi` reporta
+en la esquina superior derecha la versión de CUDA que soporta el driver
+instalado, y con ese número se elige el índice en
+[pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/).
+
+**Si la máquina no tiene GPU NVIDIA**, omite el `--index-url` por completo:
+
+```powershell
+pip install torch
+```
+
+Eso instala la build de CPU. Todo el pipeline corre igual; el entrenamiento
+completo tarda bastante más, pero los siete pasos de la demo siguen siendo
+cuestión de minutos.
+
+Versiones con las que se desarrolló, por si hace falta reproducir el entorno
+exacto:
 
 | Paquete | Versión | Para qué |
 |---|---|---|
@@ -53,6 +124,16 @@ PyTorch se instala con el índice de CUDA correspondiente; en esta máquina es
 | `pyarrow` | 25.0.1 | Leer y escribir Parquet |
 | `matplotlib` | 3.11.2 | Gráficas |
 
+### 5. Comprobar que quedó bien
+
+```powershell
+python check_gpu.py
+```
+
+Debe reportar `CUDA disponible: True` y el nombre de la GPU, o terminar en
+`CUDA NO disponible` si instalaste la build de CPU, que también es un resultado
+válido.
+
 ---
 
 ## Demo completa, en orden
@@ -62,15 +143,12 @@ Siete pasos, unos 90 segundos de cómputo en total.
 ### Paso 1 — Activar el entorno virtual
 
 ```powershell
-cd C:\Users\A01029680\Desktop\RepositorioJCRF\gemelo_digital_A01029680
+cd <la carpeta donde está el repositorio>
 .\.venv\Scripts\Activate.ps1
 ```
 
-Con Git Bash en lugar de PowerShell: `source .venv/Scripts/activate`.
-
-Sabes que funcionó porque aparece `(.venv)` al inicio del prompt. Si prefieres
-no activar nada, cada `python` de aquí en adelante se sustituye por
-`.venv\Scripts\python.exe`.
+Con Git Bash: `source .venv/Scripts/activate`. Si prefieres no activar nada,
+cada `python` de aquí en adelante se sustituye por `.venv\Scripts\python.exe`.
 
 ### Paso 2 — Verificar la GPU
 
@@ -78,10 +156,9 @@ no activar nada, cada `python` de aquí en adelante se sustituye por
 python check_gpu.py
 ```
 
-Debe reportar `CUDA disponible: True` y el nombre de la GPU. El script no solo
-pregunta si hay GPU: multiplica dos matrices de 5000×5000 para confirmar que
-**realmente ejecuta**, porque `is_available()` puede dar `True` y aun así fallar
-al lanzar kernels.
+El script no solo pregunta si hay GPU: multiplica dos matrices de 5000×5000 para
+confirmar que **realmente ejecuta**, porque `is_available()` puede dar `True` y
+aun así fallar al lanzar kernels.
 
 ### Paso 3 — Entrar a `src/`
 
@@ -140,6 +217,9 @@ particiones, las ventanas y el código de métricas, y eso es lo que hace
 comparables los números. `verificar_contra_gru()` reconstruye los objetivos del
 GRU y aborta si difieren, así que esa igualdad no se asume.
 
+Los tiempos de arriba se midieron en una RTX 4090. En CPU o en otra GPU cambian,
+pero el orden de magnitud se sostiene.
+
 ---
 
 ## Otros comandos
@@ -193,7 +273,8 @@ python -m gru.entrenar --datos ../data/raw/aulas3.parquet
 |---|---|
 | `ModuleNotFoundError` | Estás fuera de `src/`. Los comandos van con `python -m` desde ahí |
 | El prompt no dice `(.venv)` | No activaste el entorno. Vuelve al paso 1 |
-| CUDA no disponible | Corre igual en CPU, solo más lento. `python check_gpu.py` diagnostica |
+| `running scripts is disabled` | PowerShell bloquea scripts. Ve a **Instalación desde cero**, paso 3 |
+| `CUDA NO disponible` | Normal si instalaste la build de CPU. Si esperabas GPU, revisa que el índice `cuXXX` corresponda a tu driver |
 | Tarda demasiado | Te faltó `--implementacion pytorch` |
 | SARIMAX no termina | Usaste `--estacionalidad estacional`. Quítalo |
 
