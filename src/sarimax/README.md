@@ -37,10 +37,11 @@ Medido sobre una semana de datos, un solo modelo:
 
 | Configuración | Tiempo de ajuste | Dimensión del estado |
 |---|---|---|
-| `s=288` estacional | 104 s | 289 |
-| ARIMAX + Fourier K=4 | 0.3 s | 3 |
+| `s=288` estacional | **2,147 s** | 289 |
+| ARIMAX + Fourier K=4 | **0.82 s** | 3 |
 
-Y hacen falta 25 modelos.
+Medido sobre los datos del proyecto, no estimado: son **2,600x**. Y hacen
+falta 25 modelos, lo que da unas 15 horas contra 26 segundos.
 
 **La alternativa usa una parte de la misma ecuación que ya está ahí.** En vez de
 pedirle al modelo que mire 288 pasos atrás, entran términos de seno y coseno con

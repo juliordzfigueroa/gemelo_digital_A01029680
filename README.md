@@ -170,7 +170,9 @@ Pendientes: `src/anomalias/` (detector 3σ), `src/llm/` (Llama 3.1) y
 
 | Documento | Contenido |
 |---|---|
-| [docs/guia_demo_gru.md](docs/guia_demo_gru.md) | Guion para presentar el GRU, conceptos clave y preguntas difíciles |
+| [docs/guia_demo_completa.md](docs/guia_demo_completa.md) | **Empieza aquí para la demo**: comandos en orden, dónde vive cada concepto, qué mostrar |
+| [docs/guia_demo_gru.md](docs/guia_demo_gru.md) | Guion narrado del GRU, conceptos clave y preguntas difíciles |
+| [src/sarimax/README.md](src/sarimax/README.md) | Qué es y qué no es el baseline, y por qué no `s=288` |
 | [src/gru/README.md](src/gru/README.md) | Decisiones de diseño del modelo y qué queda abierto |
 | [docs/estandar_codigo.md](docs/estandar_codigo.md) | Convención de documentación del código |
 | [docs/hallazgos_robod.md](docs/hallazgos_robod.md) | Evaluación descartada de ROBOD y qué defectos reaparecerán con los sensores propios |
