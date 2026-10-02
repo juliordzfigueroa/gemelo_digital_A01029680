@@ -31,45 +31,123 @@ lo único que cambia es el argumento `--data`.
 - Python con el entorno virtual del repo (`.venv`)
 - GPU NVIDIA con CUDA (opcional; corre en CPU, solo más lento)
 
-```bash
-.venv/Scripts/python.exe check_gpu.py
-```
-
-Debe reportar `CUDA disponible: True` y el nombre de la GPU.
-
 ### Dependencias
 
-```bash
-.venv/Scripts/python.exe -m pip install torch pandas numpy scikit-learn statsmodels matplotlib pyarrow
+Solo la primera vez, con el entorno activado:
+
+```powershell
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install pandas numpy scikit-learn statsmodels matplotlib pyarrow
 ```
 
 PyTorch se instala con el índice de CUDA correspondiente; en esta máquina es
 `cu128`.
 
+| Paquete | Versión | Para qué |
+|---|---|---|
+| `torch` | 2.11.0+cu128 | La red neuronal y el cómputo en GPU |
+| `pandas` | 3.0.6 | Series de tiempo, agregación, ventanas |
+| `numpy` | 2.5.2 | Operaciones numéricas y métricas |
+| `statsmodels` | 0.15.0 | SARIMAX (filtro de Kalman) |
+| `scikit-learn` | 1.9.1 | Utilidades de partición |
+| `pyarrow` | 25.0.1 | Leer y escribir Parquet |
+| `matplotlib` | 3.11.2 | Gráficas |
+
 ---
 
-## Cómo correrlo
+## Demo completa, en orden
 
-Todos los comandos se ejecutan **desde `src/`**, con `python -m`, porque las
-carpetas son paquetes de Python.
+Siete pasos, unos 90 segundos de cómputo en total.
 
-```bash
+### Paso 1 — Activar el entorno virtual
+
+```powershell
+cd C:\Users\A01029680\Desktop\RepositorioJCRF\gemelo_digital_A01029680
+.\.venv\Scripts\Activate.ps1
+```
+
+Con Git Bash en lugar de PowerShell: `source .venv/Scripts/activate`.
+
+Sabes que funcionó porque aparece `(.venv)` al inicio del prompt. Si prefieres
+no activar nada, cada `python` de aquí en adelante se sustituye por
+`.venv\Scripts\python.exe`.
+
+### Paso 2 — Verificar la GPU
+
+```powershell
+python check_gpu.py
+```
+
+Debe reportar `CUDA disponible: True` y el nombre de la GPU. El script no solo
+pregunta si hay GPU: multiplica dos matrices de 5000×5000 para confirmar que
+**realmente ejecuta**, porque `is_available()` puede dar `True` y aun así fallar
+al lanzar kernels.
+
+### Paso 3 — Entrar a `src/`
+
+```powershell
 cd src
 ```
 
-### Verificación (~2.5 min)
+Todo lo demás corre desde aquí, con `python -m`, porque las carpetas son
+paquetes de Python.
 
-Confirma que la red aprende una serie limpia cuya respuesta se conoce. Si falla,
+### Paso 4 — Generar los datos sintéticos (~5 s)
+
+```powershell
+python -m common.synthetic --days 20 --spaces 2
+```
+
+Imprime un resumen por espacio y escribe `data/raw/synthetic.parquet`. Los
+pasos siguientes generan sus propios datos con la misma semilla, así que este
+paso sirve para inspeccionarlos; no es un requisito de los demás.
+
+### Paso 5 — Verificar que la red aprende (~17 s)
+
+```powershell
+python -m gru.train --known-series-test --implementation pytorch
+```
+
+Debe terminar con `OK: la red aprende la estructura de una serie conocida.`
+Confirma que la red aprende una serie limpia cuya respuesta se conoce: si falla,
 el problema está en el código y no en los datos.
 
-```bash
-../.venv/Scripts/python.exe -m gru.train --known-series-test
+**Usa siempre `--implementation pytorch` en vivo.** Sin esa bandera corre la
+celda escrita a mano, que tarda unos 2.5 minutos.
+
+### Paso 6 — El baseline SARIMAX (~26 s)
+
+```powershell
+python -m sarimax.train --days 20 --spaces 2
 ```
+
+Ajusta un modelo univariado por variable y espacio, así que 5 variables en 2
+espacios son 10 ajustes independientes.
+
+### Paso 7 — La comparación (~40 s)
+
+```powershell
+python compare_models.py --days 20 --spaces 2
+```
+
+Entrena los dos modelos y los compara sobre las mismas ventanas de prueba. Es
+el resultado principal del prototipo.
+
+Los dos se entrenan por separado y con criterios distintos: el GRU minimiza MSE
+por backpropagation, SARIMAX maximiza verosimilitud por filtro de Kalman.
+Ninguno alimenta al otro. Lo que comparten es el conjunto de prueba, las
+particiones, las ventanas y el código de métricas, y eso es lo que hace
+comparables los números. `check_against_gru()` reconstruye los objetivos del
+GRU y aborta si difieren, así que esa igualdad no se asume.
+
+---
+
+## Otros comandos
 
 ### Entrenamiento completo (~30 min en RTX 4090)
 
-```bash
-../.venv/Scripts/python.exe -m gru.train --days 60
+```powershell
+python -m gru.train --days 60
 ```
 
 Con `--implementation pytorch` baja a unos 2 minutos, útil mientras iteras. La
@@ -81,49 +159,67 @@ normalización (`gru_normalizer.json`) y las métricas de la corrida
 (`gru_metadata.json`). **Los tres son necesarios**: sin el normalizador, las
 salidas del modelo no se pueden convertir a ppm ni a grados.
 
-### Baseline SARIMAX y comparación
-
-```bash
-../.venv/Scripts/python.exe -m sarimax.train          # solo el baseline
-../.venv/Scripts/python.exe compare_models.py          # GRU contra SARIMAX
-```
-
-Los dos modelos se entrenan por separado y con criterios distintos: el GRU
-minimiza MSE por backpropagation, SARIMAX maximiza verosimilitud por filtro de
-Kalman. Ninguno alimenta al otro. Lo que comparten es el conjunto de prueba, las
-particiones, las ventanas y el código de métricas, y eso es lo que hace
-comparables los números.
-
 ### Comparar las dos implementaciones recurrentes
 
 Entrena la celda escrita a mano y la de PyTorch con la misma semilla y los
 mismos datos, y verifica que lleguen a métricas equivalentes.
 
-```bash
-../.venv/Scripts/python.exe -m gru.compare_implementations
-```
-
-### Generar solo los datos
-
-```bash
-../.venv/Scripts/python.exe -m common.synthetic --days 60
+```powershell
+python -m gru.compare_implementations
 ```
 
 ### Con datos reales, cuando existan
 
-```bash
-../.venv/Scripts/python.exe -m gru.train --data ../data/raw/aulas3.parquet
+```powershell
+python -m gru.train --data ../data/raw/aulas3.parquet
 ```
 
 ### Opciones útiles
 
 | Opción | Para qué |
 |---|---|
+| `--days N` | Días de datos sintéticos a generar |
+| `--spaces N` | Espacios a simular (no aplica a `gru.train`) |
 | `--epochs N` | Tope de épocas (por omisión 200, pero el early stopping suele cortar antes) |
 | `--patience N` | Épocas sin mejora antes de detener |
 | `--normalize-by-space` | Media y sigma por espacio en vez de globales |
 | `--label nombre` | Prefijo de los archivos guardados, para comparar corridas |
-| `--implementation pytorch` | Usa `nn.GRU` en vez de la celda escrita a mano: ~15× más rápido, útil para iterar |
+| `--implementation pytorch` | Usa `nn.GRU` en vez de la celda escrita a mano: ~14× más rápido |
+| `--seasonality seasonal` | SARIMAX con `s=288` en vez de Fourier. Inviable: 2,147 s por modelo |
+
+### Si algo falla
+
+| Síntoma | Qué hacer |
+|---|---|
+| `ModuleNotFoundError` | Estás fuera de `src/`. Los comandos van con `python -m` desde ahí |
+| El prompt no dice `(.venv)` | No activaste el entorno. Vuelve al paso 1 |
+| CUDA no disponible | Corre igual en CPU, solo más lento. `python check_gpu.py` diagnostica |
+| Tarda demasiado | Te faltó `--implementation pytorch` |
+| SARIMAX no termina | Usaste `--seasonality seasonal`. Quítalo |
+
+---
+
+## Dónde se muestran los resultados
+
+### En pantalla
+
+| Qué | Dónde se imprime |
+|---|---|
+| Tabla de métricas por variable | `metrics.imprimir()` |
+| MAE por horizonte | `train.main()` |
+| GRU contra SARIMAX | `compare_models.print_comparison()` |
+
+### En archivos
+
+| Archivo | Qué guarda |
+|---|---|
+| `models/gru.pt` | Los pesos entrenados |
+| `models/gru_normalizer.json` | Media y sigma por variable |
+| `models/gru_metadata.json` | Métricas, mejor época, hiperparámetros |
+| `models/sarimax_metadata.json` | Métricas y AIC de los modelos ajustados |
+| `data/processed/comparison_gru_sarimax.json` | La comparación completa |
+
+Ninguno de esos archivos se versiona.
 
 ---
 
@@ -154,7 +250,7 @@ src/common/        contrato de datos, ventanas, normalización, métricas
 src/gru/          modelo predictivo (ver src/gru/README.md)
 src/sarimax/      baseline estadístico
 src/compare_models.py   GRU contra SARIMAX sobre las mismas ventanas
-docs/             guía de demo, estándar de código, hallazgos de ROBOD
+docs/             estándar de código, hallazgos de ROBOD
 data/raw/         datos de entrada (no versionados)
 data/processed/   datos derivados (no versionados)
 models/           pesos y metadatos (no versionados)
@@ -170,10 +266,8 @@ Pendientes: `src/anomalias/` (detector 3σ), `src/llm/` (Llama 3.1) y
 
 | Documento | Contenido |
 |---|---|
-| [docs/guia_demo_completa.md](docs/guia_demo_completa.md) | **Empieza aquí para la demo**: comandos en orden, dónde vive cada concepto, qué mostrar |
-| [docs/guia_demo_gru.md](docs/guia_demo_gru.md) | Guion narrado del GRU, conceptos clave y preguntas difíciles |
-| [src/sarimax/README.md](src/sarimax/README.md) | Qué es y qué no es el baseline, y por qué no `s=288` |
 | [src/gru/README.md](src/gru/README.md) | Decisiones de diseño del modelo y qué queda abierto |
+| [src/sarimax/README.md](src/sarimax/README.md) | Qué es y qué no es el baseline, y por qué no `s=288` |
 | [docs/estandar_codigo.md](docs/estandar_codigo.md) | Convención de documentación del código |
 | [docs/hallazgos_robod.md](docs/hallazgos_robod.md) | Evaluación descartada de ROBOD y qué defectos reaparecerán con los sensores propios |
 
