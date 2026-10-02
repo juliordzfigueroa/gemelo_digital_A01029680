@@ -13,9 +13,9 @@ Deliberately reproduced defects:
   - noisy binary movement, like a real PIR
   - gaps in the series, like WiFi telemetry dropouts
 
-Usage:
-    python synthetic.py            # writes data/raw/synthetic.parquet
-    python synthetic.py --days 90
+Usage, from the src/ directory:
+    python -m common.synthetic            # writes data/raw/synthetic.parquet
+    python -m common.synthetic --days 90
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
@@ -34,7 +34,7 @@ import argparse
 import numpy as np
 import pandas as pd
 
-import config as cfg
+from common import config as cfg
 
 # Per-space profile: light scale, typical capacity and opening hours. Light
 # scales differ by two orders of magnitude on purpose, which is what was

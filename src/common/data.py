@@ -18,7 +18,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Applied the project documentation standard.
+    2026-10-01 - Split preprocess() out of prepare() so SARIMAX can reuse it.
 
 Reference:
     Section 4.2.6 of the research document.
@@ -34,7 +34,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-import config as cfg
+from common import config as cfg
 
 
 # --------------------------------------------------------------------------
@@ -436,18 +436,20 @@ class EnvironmentalWindows(Dataset):
 
 
 # --------------------------------------------------------------------------
-def prepare(
-    df: pd.DataFrame, by_space: bool = False
-) -> tuple[dict[str, EnvironmentalWindows], Normalizer, list[str], dict[int, int]]:
-    """Run the whole pipeline, from the data contract to the three splits.
+def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Run every step that precedes normalization.
+
+    Split into blocks, snap to the regular grid, assign partitions and add the
+    cyclical time features. Deliberately stops short of normalizing, because
+    SARIMAX works in physical units while the GRU works in z-scores: sharing
+    this function is what guarantees both models see the same rows in the same
+    partitions, which is the precondition for the comparison to mean anything.
 
     Args:
         df: Frame satisfying the data contract described in config.py.
-        by_space: Whether to normalize per space instead of globally.
 
     Returns:
-        A tuple of (splits, normalizer, feature column names, space index map).
-        `splits` is keyed by "entrenamiento", "validacion" and "prueba".
+        A tuple of (preprocessed frame, feature column names in order).
 
     Raises:
         ValueError: If the frame does not satisfy the data contract.
@@ -464,7 +466,26 @@ def prepare(
     df = split(df)
 
     time_columns = add_time_features(df) if cfg.USE_TIME_FEATURES else []
-    feature_columns = list(cfg.ACTIVE_VARIABLES) + time_columns
+    return df, list(cfg.ACTIVE_VARIABLES) + time_columns
+
+
+def prepare(
+    df: pd.DataFrame, by_space: bool = False
+) -> tuple[dict[str, EnvironmentalWindows], Normalizer, list[str], dict[int, int]]:
+    """Run the whole pipeline, from the data contract to the three splits.
+
+    Args:
+        df: Frame satisfying the data contract described in config.py.
+        by_space: Whether to normalize per space instead of globally.
+
+    Returns:
+        A tuple of (splits, normalizer, feature column names, space index map).
+        `splits` is keyed by "entrenamiento", "validacion" and "prueba".
+
+    Raises:
+        ValueError: If the frame does not satisfy the data contract.
+    """
+    df, feature_columns = preprocess(df)
 
     normalizer = Normalizer(by_space=by_space)
     normalizer.fit(df[df["partition"] == "train"])

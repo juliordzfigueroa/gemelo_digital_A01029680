@@ -13,9 +13,9 @@ Both runs share the seed, the splits and the normalizer, so any difference in
 the metrics comes from the formulation and not from the data or the
 initialization scale.
 
-Usage:
-    python compare_implementations.py
-    python compare_implementations.py --days 60
+Usage, from the src/ directory:
+    python -m gru.compare_implementations
+    python -m gru.compare_implementations --days 60
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
@@ -32,9 +32,9 @@ from __future__ import annotations
 import argparse
 import json
 
-import config as cfg
-import train as ent
-import synthetic
+from common import config as cfg
+from gru import train as ent
+from common import synthetic
 
 
 def compare(days: int, spaces: int, epochs: int, patience: int) -> dict:

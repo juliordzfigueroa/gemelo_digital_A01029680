@@ -5,16 +5,16 @@ normalization statistics and the metadata needed to reproduce inference. The
 model is only useful alongside its normalizer: without the mean and sigma it
 was trained with, its outputs cannot be turned back into physical units.
 
-Usage:
-    python train.py                      # synthetic data
-    python train.py --data ruta.parquet # once real readings exist
-    python train.py --known-series-test   # quick implementation check
+Usage, from the src/ directory:
+    python -m gru.train                        # synthetic data
+    python -m gru.train --data ruta.parquet   # once real readings exist
+    python -m gru.train --known-series-test --implementation pytorch
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Added the --implementation flag to pick the recurrent variant.
+    2026-10-01 - Made --known-series-test honour --implementation.
 
 Reference:
     Sections 4.2.6 and 5.5 of the research document.
@@ -33,10 +33,10 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-import config as cfg
-import data as dat
-import metrics as met
-import model as mod
+from common import config as cfg
+from common import data as dat
+from common import metrics as met
+from gru import model as mod
 
 
 def device() -> torch.device:
@@ -317,7 +317,7 @@ def save(output: dict, folder: Path = cfg.MODELS, label: str = "gru") -> None:
     )
 
 
-def implementation_check() -> int:
+def implementation_check(implementation: str = cfg.GRU_IMPLEMENTATION) -> int:
     """Check that the network can learn something whose answer is known.
 
     This is the test that stands in for reproducing a published benchmark: if
@@ -325,14 +325,21 @@ def implementation_check() -> int:
     and not in the data. It is not a performance result to report, only
     evidence that the pipeline works.
 
+    Args:
+        implementacion: Which recurrent cell to exercise. "pytorch" runs in
+            seconds and is the sensible choice for a live check; "cho" takes
+            minutes because of the Python loop over timesteps.
+
     Returns:
         Process exit code: 0 when the network learns, 1 when it does not.
     """
-    import synthetic
+    from common import synthetic
 
     print("== Prueba de implementacion: serie sintetica sin huecos, 20 dias ==")
     df = synthetic.generate(days=20, n_spaces=2, with_gaps=False)
-    output = train(df, epochs=30, patience=8, quiet=False)
+    output = train(
+        df, epochs=30, patience=8, quiet=False, implementation=implementation
+    )
     met.print_report(output["results"], "Prueba de implementacion")
 
     r2_global = output["results"]["global"]["r2"]
@@ -389,10 +396,10 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.known_series_test:
-        return implementation_check()
+        return implementation_check(args.implementation)
 
     if args.data is None:
-        import synthetic
+        from common import synthetic
 
         print(f"Sin --datos: generando {args.days} dias sinteticos.")
         df = synthetic.generate(days=args.days)
