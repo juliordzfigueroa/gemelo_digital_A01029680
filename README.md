@@ -197,9 +197,7 @@ válido.
 
 ---
 
-## Demo completa, en orden
-
-Siete pasos, unos 90 segundos de cómputo en total.
+## Pasos de prueba para el entrenamiento
 
 ### Paso 1 — Activar el entorno virtual
 
@@ -230,7 +228,7 @@ cd src
 Todo lo demás corre desde aquí, con `python -m`, porque las carpetas son
 paquetes de Python.
 
-### Paso 4 — Generar los datos sintéticos (~5 s)
+### Paso 4 — Generar los datos sintéticos
 
 ```powershell
 python -m comun.sintetico --dias 20 --espacios 2
@@ -240,7 +238,7 @@ Imprime un resumen por espacio y escribe `data/raw/sintetico.parquet`. Los
 pasos siguientes generan sus propios datos con la misma semilla, así que este
 paso sirve para inspeccionarlos; no es un requisito de los demás.
 
-### Paso 5 — Verificar que la red aprende (~17 s)
+### Paso 5 — Verificar que la red aprende
 
 ```powershell
 python -m gru.entrenar --prueba-sintetica --implementacion pytorch
@@ -253,7 +251,7 @@ el problema está en el código y no en los datos.
 **Usa siempre `--implementacion pytorch` en vivo.** Sin esa bandera corre la
 celda escrita a mano, que tarda unos 2.5 minutos.
 
-### Paso 6 — El baseline SARIMAX (~26 s)
+### Paso 6 — El baseline SARIMAX
 
 ```powershell
 python -m sarimax.entrenar --dias 20 --espacios 2
@@ -262,7 +260,7 @@ python -m sarimax.entrenar --dias 20 --espacios 2
 Ajusta un modelo univariado por variable y espacio, así que 5 variables en 2
 espacios son 10 ajustes independientes.
 
-### Paso 7 — La comparación (~40 s)
+### Paso 7 — La comparación
 
 ```powershell
 python comparar_modelos.py --dias 20 --espacios 2
