@@ -214,10 +214,6 @@ def invalidar(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             fuera |= df[variable] < minimo
         if maximo is not None:
             fuera |= df[variable] > maximo
-        if variable == "luz":
-            # Real nodes report light as a percentage, so it is bounded above
-            # even though the synthetic lux scale in config is not.
-            fuera |= df[variable] > 100
         marcar(fuera & df[variable].notna(), variable, "fuera_de_rango")
 
     return df, conteo

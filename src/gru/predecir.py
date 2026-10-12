@@ -327,6 +327,42 @@ def _ventana_normalizada(
     return rasgos
 
 
+def ultima_ventana_contigua(filas: pd.DataFrame, pasos: int) -> pd.DataFrame | None:
+    """Find the most recent run of `pasos` consecutive readings.
+
+    Taking the last N rows is not enough. Readings arrive as missing rows when
+    a node loses the network, so the last 12 rows can span a two-day hole and
+    still look like a valid window. The network would consume it without
+    complaint and forecast from a sequence that never happened.
+
+    Args:
+        filas: Rows of one space, sorted by time.
+        pasos: How many consecutive readings are needed.
+
+    Returns:
+        The last window whose steps are exactly one sampling interval apart,
+        or None if the history holds no such run.
+    """
+    if len(filas) < pasos:
+        return None
+
+    paso = pd.Timedelta(seconds=cfg.INTERVALO_SEGUNDOS)
+    marcas = pd.to_datetime(filas[cfg.COLUMNA_TIEMPO])
+    contiguo = marcas.diff() == paso
+
+    # Walk backwards: the first window that is fully contiguous and complete
+    # is the freshest usable one.
+    for fin in range(len(filas), pasos - 1, -1):
+        inicio = fin - pasos
+        ventana = filas.iloc[inicio:fin]
+        if not contiguo.iloc[inicio + 1 : fin].all():
+            continue
+        if ventana[cfg.VARIABLES_ACTIVAS].isna().to_numpy().any():
+            continue
+        return ventana
+    return None
+
+
 def predecir(
     red: mod.GRUAmbiental,
     normalizador: Normalizador,
@@ -454,7 +490,7 @@ def predecir(
 
 
 def main() -> int:
-    """Forecast one space from synthetic data and print the result.
+    """Forecast one space from the cleaned sensor data and print the result.
 
     Exists so the module can be exercised without the API on top, which is how
     a broken checkpoint or a stale metadata file gets caught early.
@@ -464,12 +500,14 @@ def main() -> int:
     """
     import argparse
 
-    from comun import sintetico
+    from comun import datos as dat
 
     parser = argparse.ArgumentParser(description="Forecast one space.")
-    parser.add_argument("--espacio", type=int, default=1)
+    parser.add_argument("--espacio", type=int, default=308)
     parser.add_argument("--horizonte", type=int, default=30)
-    parser.add_argument("--dias", type=int, default=3)
+    parser.add_argument(
+        "--datos", default=None, help="contract frame; defaults to the cleaned sensor data"
+    )
     args = parser.parse_args()
 
     red, normalizador, metadatos = cargar_modelo()
@@ -479,11 +517,15 @@ def main() -> int:
         f"espacios {sorted(int(k) for k in metadatos['indice_espacios'])}"
     )
 
-    df = sintetico.genera(dias=args.dias, n_espacios=5)
+    df = dat.cargar_datos(args.datos)
     propio = df[df[cfg.COLUMNA_ESPACIO] == args.espacio].sort_values(
         cfg.COLUMNA_TIEMPO
-    )
-    ventana = propio.tail(metadatos["pasos_entrada"])
+    ).reset_index(drop=True)
+    ventana = ultima_ventana_contigua(propio, metadatos["pasos_entrada"])
+    if ventana is None:
+        print(f"El espacio {args.espacio} no tiene una hora de lecturas consecutivas.")
+        return 1
+    print(f"Ventana: {ventana[cfg.COLUMNA_TIEMPO].iloc[0]} a {ventana[cfg.COLUMNA_TIEMPO].iloc[-1]}")
 
     salida = predecir(
         red,

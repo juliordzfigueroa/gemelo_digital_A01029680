@@ -317,6 +317,49 @@ def guardar(salida: dict, carpeta: Path = cfg.MODELOS, etiqueta: str = "gru") ->
     )
 
 
+def serie_conocida(dias: int = 20, n_espacios: int = 2) -> pd.DataFrame:
+    """Build a clean, deterministic series whose structure is known exactly.
+
+    Classes run on weekdays from 8:00 to 14:00. CO2 follows the occupancy with
+    a first-order lag, temperature and humidity follow a daily cycle plus the
+    occupancy, light follows daylight, and movement is the occupancy itself.
+    No noise and no gaps: a network that cannot fit this has a bug.
+
+    Args:
+        dias: Length of the series in days, starting on a Monday.
+        n_espacios: How many spaces, each with a different CO2 amplitude so
+            the space embedding has something to learn.
+
+    Returns:
+        A frame satisfying the data contract.
+    """
+    marcas = pd.date_range("2026-01-05", periods=dias * 288, freq="5min")
+    hora = np.asarray(marcas.hour + marcas.minute / 60)
+    habil = np.asarray(marcas.dayofweek < 5)
+    ocupacion = (habil & (hora >= 8) & (hora < 14)).astype(float)
+    ciclo = np.sin(2 * np.pi * (hora - 9) / 24)
+    sol = np.clip(np.sin(np.pi * (hora - 7) / 12), 0, None)
+
+    partes = []
+    for espacio in range(1, n_espacios + 1):
+        objetivo = 420 + 600 * (1 + 0.3 * (espacio - 1)) * ocupacion
+        co2 = np.empty_like(objetivo)
+        nivel = 420.0
+        for i, meta in enumerate(objetivo):
+            nivel += 0.08 * (meta - nivel)
+            co2[i] = nivel
+        partes.append(pd.DataFrame({
+            cfg.COLUMNA_TIEMPO: marcas,
+            cfg.COLUMNA_ESPACIO: espacio,
+            "co2": co2,
+            "temperatura": 22 + 1.5 * ciclo + (co2 - 420) / 600,
+            "humedad": 50 - 4 * ciclo + 3 * ocupacion,
+            "luz": np.clip(70 * sol + 20 * ocupacion, 0, 100),
+            "movimiento": ocupacion,
+        }))
+    return pd.concat(partes, ignore_index=True)
+
+
 def prueba_de_implementacion(implementacion: str = cfg.IMPLEMENTACION_GRU) -> int:
     """Check that the network can learn something whose answer is known.
 
@@ -333,10 +376,8 @@ def prueba_de_implementacion(implementacion: str = cfg.IMPLEMENTACION_GRU) -> in
     Returns:
         Process exit code: 0 when the network learns, 1 when it does not.
     """
-    from comun import sintetico
-
-    print("== Prueba de implementacion: serie sintetica sin huecos, 20 dias ==")
-    df = sintetico.genera(dias=20, n_espacios=2, con_huecos=False)
+    print("== Prueba de implementacion: serie conocida sin ruido ni huecos, 20 dias ==")
+    df = serie_conocida()
     salida = entrenar(
         df, epocas=30, paciencia=8, silencioso=False, implementacion=implementacion
     )
@@ -369,10 +410,8 @@ def main() -> int:
         "--datos",
         type=Path,
         default=None,
-        help="parquet or csv satisfying the data contract; synthetic if omitted",
-    )
-    parser.add_argument(
-        "--dias", type=int, default=60, help="days to generate when --datos is absent"
+        help="parquet or csv satisfying the data contract; defaults to the "
+        "cleaned sensor data",
     )
     parser.add_argument("--epocas", type=int, default=cfg.EPOCAS_MAXIMAS)
     parser.add_argument("--paciencia", type=int, default=cfg.PACIENCIA)
@@ -398,15 +437,8 @@ def main() -> int:
     if args.prueba_sintetica:
         return prueba_de_implementacion(args.implementacion)
 
-    if args.datos is None:
-        from comun import sintetico
-
-        print(f"Sin --datos: generando {args.dias} dias sinteticos.")
-        df = sintetico.genera(dias=args.dias)
-    elif args.datos.suffix == ".parquet":
-        df = pd.read_parquet(args.datos)
-    else:
-        df = pd.read_csv(args.datos, parse_dates=[cfg.COLUMNA_TIEMPO])
+    df = dat.cargar_datos(args.datos)
+    print(f"Datos: {len(df):,} filas, espacios {sorted(df[cfg.COLUMNA_ESPACIO].unique())}")
 
     salida = entrenar(
         df,

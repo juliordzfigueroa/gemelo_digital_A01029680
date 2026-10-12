@@ -12,9 +12,9 @@ else.
 
 What is wired and what is not. The GRU is real: the forecast comes from the
 trained checkpoint in models/. The data source is not: the three retrieval
-functions read an in-memory synthetic frame generated at startup, because the
-Aulas 3 sensors are still being installed and the Tec database is not
-reachable yet. They are marked `TODO E5` and are the only places that change
+functions read the cleaned sensor file written by ingesta.limpieza, loaded at
+startup, because the Tec database is not reachable yet. So "current" means
+the latest reading in that file, not the present moment. They are marked `TODO E5` and are the only places that change
 when it is. The anomaly detector does not exist at all, and this module says
 so rather than reporting that nothing was found, which would be a different
 claim entirely.
@@ -23,7 +23,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Initial implementation.
+    2026-10-12 - Read the cleaned sensor data instead of synthetic data.
 
 Reference:
     Sections 4.3.1 to 4.3.4 of the research document.
@@ -39,14 +39,9 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from comun import config as cfg
-from comun import sintetico
+from comun import datos as dat
 from gru import predecir as pred
 from llm import clasificador, cliente_llm, contexto
-
-# Days of synthetic history kept in memory as the stand-in for the database.
-# Enough to answer a "yesterday" question and to leave contiguous windows.
-DIAS_SINTETICOS = 7
-ESPACIOS_SINTETICOS = 5
 
 # Default span for a historical question when the user names no period.
 HORAS_HISTORICAS = 24
@@ -120,13 +115,19 @@ async def ciclo_de_vida(app: FastAPI):
     # TODO E5: replace with a connection to the Tec database. Everything
     # downstream reads this frame through the three retrieval functions, so
     # only they change.
-    ESTADO["datos"] = sintetico.genera(
-        dias=DIAS_SINTETICOS, n_espacios=ESPACIOS_SINTETICOS
-    )
-    print(
-        f"Datos sinteticos en memoria: {len(ESTADO['datos']):,} filas, "
-        f"{ESPACIOS_SINTETICOS} espacios, {DIAS_SINTETICOS} dias"
-    )
+    try:
+        ESTADO["datos"] = dat.cargar_datos()
+        datos = ESTADO["datos"]
+        print(
+            f"Datos en memoria: {len(datos):,} filas, espacios "
+            f"{sorted(datos[cfg.COLUMNA_ESPACIO].unique())}, hasta "
+            f"{datos[cfg.COLUMNA_TIEMPO].max()}"
+        )
+    except FileNotFoundError as e:
+        ESTADO["datos"] = pd.DataFrame(
+            columns=[cfg.COLUMNA_TIEMPO, cfg.COLUMNA_ESPACIO, *cfg.VARIABLES_ACTIVAS]
+        )
+        print(f"ADVERTENCIA: sin datos: {e}")
     yield
 
 
@@ -155,42 +156,6 @@ def _filas_de_espacio(espacio_id: int) -> pd.DataFrame:
     datos = ESTADO["datos"]
     propias = datos[datos[cfg.COLUMNA_ESPACIO] == espacio_id]
     return propias.sort_values(cfg.COLUMNA_TIEMPO).reset_index(drop=True)
-
-
-def _ultima_ventana_contigua(filas: pd.DataFrame, pasos: int) -> pd.DataFrame | None:
-    """Find the most recent run of `pasos` consecutive readings.
-
-    Taking the last N rows is not enough. Readings arrive as missing rows when
-    a node loses the network, so the last 12 rows can span a two-day hole and
-    still look like a valid window. The network would consume it without
-    complaint and forecast from a sequence that never happened.
-
-    Args:
-        filas: Rows of one space, sorted by time.
-        pasos: How many consecutive readings are needed.
-
-    Returns:
-        The last window whose steps are exactly one sampling interval apart,
-        or None if the history holds no such run.
-    """
-    if len(filas) < pasos:
-        return None
-
-    paso = pd.Timedelta(seconds=cfg.INTERVALO_SEGUNDOS)
-    marcas = pd.to_datetime(filas[cfg.COLUMNA_TIEMPO])
-    contiguo = marcas.diff() == paso
-
-    # Walk backwards: the first window that is fully contiguous and complete
-    # is the freshest usable one.
-    for fin in range(len(filas), pasos - 1, -1):
-        inicio = fin - pasos
-        ventana = filas.iloc[inicio:fin]
-        if not contiguo.iloc[inicio + 1 : fin].all():
-            continue
-        if ventana[cfg.VARIABLES_ACTIVAS].isna().to_numpy().any():
-            continue
-        return ventana
-    return None
 
 
 def _datos_actuales(espacio_id: int) -> dict:
@@ -310,7 +275,7 @@ def _datos_predictivos(intencion: clasificador.Intencion, espacio_id: int) -> di
 
     metadatos = ESTADO["metadatos"]
     filas = _filas_de_espacio(espacio_id)
-    ventana = _ultima_ventana_contigua(filas, metadatos["pasos_entrada"])
+    ventana = pred.ultima_ventana_contigua(filas, metadatos["pasos_entrada"])
 
     if ventana is None:
         return {
@@ -410,7 +375,7 @@ def _espacio_elegido(intencion: clasificador.Intencion, pedido: int | None) -> i
     metadatos = ESTADO["metadatos"]
     if metadatos:
         return min(int(k) for k in metadatos["indice_espacios"])
-    return 1
+    return int(ESTADO["datos"][cfg.COLUMNA_ESPACIO].min())
 
 
 # --------------------------------------------------------------------------
@@ -434,7 +399,7 @@ def health() -> dict:
         "ollama_listo": listo,
         "ollama_detalle": motivo,
         "filas_en_memoria": 0 if datos is None else int(len(datos)),
-        "fuente_de_datos": "sintetica",
+        "fuente_de_datos": str(cfg.DATOS_REALES.name),
         "detector_anomalias": "no_implementado",
     }
 

@@ -24,8 +24,10 @@ Reference:
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from comun import config as cfg
 
@@ -79,17 +81,29 @@ SINONIMOS_VARIABLE = {
     "movimiento": ["movimiento", "ocupación", "ocupacion", "personas", "gente", "ocupado"],
 }
 
-# Room identifiers. Placeholder until the real Aulas 3 room numbers and their
-# mapping to espacio_id are known; the synthetic generator uses ids 1 to 5.
-#
-# Reference: pending, see src/llm/README.md
-ESPACIOS = {
-    1: ["3302", "aula 1", "salón 1", "salon 1"],
-    2: ["3305", "aula 2", "salón 2", "salon 2"],
-    3: ["3201", "aula 3", "salón 3", "salon 3"],
-    4: ["3105", "aula 4", "salón 4", "salon 4"],
-    5: ["pasillo", "aula 5", "salón 5", "salon 5"],
-}
+def cargar_espacios(ruta: Path = cfg.RAIZ / "config" / "espacios.json") -> dict[int, list[str]]:
+    """Read the words that name each space from the shared registry.
+
+    Args:
+        ruta: The space registry shared with the cleaning, the API and the
+            viewer, so that all of them agree on what "3308" refers to.
+
+    Returns:
+        A dict from espacio_id to the lowercase names a user might type.
+    """
+    datos = json.loads(ruta.read_text(encoding="utf-8"))
+    salida = {}
+    for espacio in datos["espacios"]:
+        nombres = {espacio["nombre"], *espacio.get("alias", [])}
+        if espacio.get("salon"):
+            nombres.add(espacio["salon"])
+        salida[int(espacio["espacio_id"])] = sorted(
+            {str(n).lower() for n in nombres if n}, key=len, reverse=True
+        )
+    return salida
+
+
+ESPACIOS = cargar_espacios()
 
 # Horizon ceiling, kept in sync with the iterative predictor.
 HORIZONTE_MAX_MIN = 120
@@ -228,8 +242,14 @@ def _extraer_espacio(texto: str) -> int | None:
         The space id, or None when the question names no space, in which case
         the caller supplies the one selected in the viewer.
     """
-    for espacio_id, sinonimos in ESPACIOS.items():
-        if _contiene_alguna(texto, sinonimos):
+    # Longest names first, so "3110" is never read as "311" plus a stray zero.
+    candidatos = sorted(
+        ((nombre, espacio_id) for espacio_id, nombres in ESPACIOS.items() for nombre in nombres),
+        key=lambda par: len(par[0]),
+        reverse=True,
+    )
+    for nombre, espacio_id in candidatos:
+        if nombre in texto:
             return espacio_id
     return None
 
@@ -297,14 +317,14 @@ def main() -> int:
         Process exit code.
     """
     ejemplos = [
-        "¿Cómo está el CO2 del salón 3302?",
-        "¿Cuál es la temperatura actual del aula 2?",
-        "¿Cómo va a estar el CO2 del 3302 en 45 minutos?",
+        "¿Cómo está el CO2 del salón 3308?",
+        "¿Cuál es la temperatura actual del 3206?",
+        "¿Cómo va a estar el CO2 del 3308 en 45 minutos?",
         "¿La humedad va a subir en dos horas?",
         "¿Cuál fue el pico de CO2 ayer en el 3201?",
-        "¿Hay algo raro en el pasillo?",
+        "¿Hay algo raro en el 3208?",
         "¿El CO2 está demasiado alto?",
-        "¿Y el 3105?",
+        "¿Y el 3305?",
         "¿El CO2 va a estar muy alto en una hora?",
     ]
 

@@ -45,7 +45,7 @@ SISTEMA = (
     "- Si los datos no alcanzan para responder, dilo explícitamente en lugar "
     "de inventar un valor.\n"
     "- Incluye las unidades: ppm para CO₂, °C para temperatura, %RH para "
-    "humedad, lux para luz.\n"
+    "humedad, % para luz.\n"
     "- Si el contexto marca una anomalía o un valor peligroso, dilo primero.\n"
     "- No repitas la pregunta ni expliques de dónde vienen los datos."
 )
@@ -73,7 +73,7 @@ ETIQUETAS_UNIDAD = {
     "co2": "ppm",
     "temperatura": "°C",
     "humedad": "%RH",
-    "luz": "lux",
+    "luz": "%",
     "movimiento": "(1 = hay movimiento, 0 = no)",
 }
 
@@ -412,7 +412,7 @@ def main() -> int:
 
     casos = [
         (
-            "¿Cómo está el CO2 del salón 3302?",
+            "¿Cómo está el CO2 del salón 3308?",
             {
                 "espacio": 1,
                 "timestamp": "2026-10-12 10:30",
@@ -423,7 +423,7 @@ def main() -> int:
             },
         ),
         (
-            "¿Cómo va a estar el CO2 del 3302 en dos horas?",
+            "¿Cómo va a estar el CO2 del 3308 en dos horas?",
             {
                 "espacio": 1,
                 "lectura_actual": {"co2": 680.0},
@@ -436,7 +436,7 @@ def main() -> int:
             },
         ),
         (
-            "¿Hay algo raro en el pasillo?",
+            "¿Hay algo raro en el 3208?",
             {"espacio": 5, "estado": "anomalia", "anomalias": [
                 {"variable": "co2", "valor": 1840.0, "sigma": 4.2,
                  "timestamp": "2026-10-12 10:25"},

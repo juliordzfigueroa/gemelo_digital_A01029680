@@ -15,7 +15,7 @@ initialization scale.
 
 Usage, from the src/ directory:
     python -m gru.comparar_implementaciones
-    python -m gru.comparar_implementaciones --dias 60
+    python -m gru.comparar_implementaciones --datos ../data/processed/aulas3.parquet
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
@@ -33,16 +33,15 @@ import argparse
 import json
 
 from comun import config as cfg
+from comun import datos as dat
 from gru import entrenar as ent
-from comun import sintetico
 
 
-def comparar(dias: int, espacios: int, epocas: int, paciencia: int) -> dict:
+def comparar(datos: str | None, epocas: int, paciencia: int) -> dict:
     """Train both implementations and collect their metrics.
 
     Args:
-        dias: Days of synthetic data to generate.
-        espacios: How many spaces to generate.
+        datos: Contract frame to load, or None for the cleaned sensor data.
         epocas: Maximum epochs per run.
         paciencia: Epochs without improvement before early stopping.
 
@@ -50,8 +49,8 @@ def comparar(dias: int, espacios: int, epocas: int, paciencia: int) -> dict:
         A dict keyed by implementation name, each holding its metrics, the
         epoch that won, the wall-clock seconds and the parameter count.
     """
-    df = sintetico.genera(dias=dias, n_espacios=espacios)
-    print(f"Datos: {len(df):,} filas, {espacios} espacios, {dias} dias\n")
+    df = dat.cargar_datos(datos)
+    print(f"Datos: {len(df):,} filas, espacios {sorted(df[cfg.COLUMNA_ESPACIO].unique())}\n")
 
     resumen = {}
     for implementacion in ("cho", "pytorch"):
@@ -177,13 +176,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compare the Cho and PyTorch recurrent implementations."
     )
-    parser.add_argument("--dias", type=int, default=20)
-    parser.add_argument("--espacios", type=int, default=2)
+    parser.add_argument(
+        "--datos", default=None, help="contract frame; defaults to the cleaned sensor data"
+    )
     parser.add_argument("--epocas", type=int, default=30)
     parser.add_argument("--paciencia", type=int, default=8)
     args = parser.parse_args()
 
-    resumen = comparar(args.dias, args.espacios, args.epocas, args.paciencia)
+    resumen = comparar(args.datos, args.epocas, args.paciencia)
     imprimir_comparacion(resumen)
 
     cfg.DATOS_PROCESADOS.mkdir(parents=True, exist_ok=True)

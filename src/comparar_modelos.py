@@ -15,7 +15,7 @@ and the metric code, and that is what makes the numbers comparable.
 
 Usage, from the src/ directory:
     python comparar_modelos.py
-    python comparar_modelos.py --dias 60 --espacios 5
+    python comparar_modelos.py --datos ../data/processed/aulas3.parquet
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
@@ -37,7 +37,6 @@ import numpy as np
 from comun import config as cfg
 from comun import datos as dat
 from comun import metricas as met
-from comun import sintetico
 from gru import entrenar as ent_gru
 from sarimax import entrenar as ent_sarimax
 
@@ -154,8 +153,9 @@ def main() -> int:
         Process exit code.
     """
     parser = argparse.ArgumentParser(description="Compare the GRU and SARIMAX.")
-    parser.add_argument("--dias", type=int, default=20)
-    parser.add_argument("--espacios", type=int, default=2)
+    parser.add_argument(
+        "--datos", default=None, help="contract frame; defaults to the cleaned sensor data"
+    )
     parser.add_argument("--epocas", type=int, default=30)
     parser.add_argument("--paciencia", type=int, default=8)
     parser.add_argument("--implementacion", choices=("cho", "pytorch"), default="pytorch")
@@ -166,8 +166,8 @@ def main() -> int:
     args = parser.parse_args()
 
     orden = tuple(int(x) for x in args.orden.split(","))
-    df = sintetico.genera(dias=args.dias, n_espacios=args.espacios)
-    print(f"Datos: {len(df):,} filas, {args.espacios} espacios, {args.dias} dias")
+    df = dat.cargar_datos(args.datos)
+    print(f"Datos: {len(df):,} filas, espacios {sorted(df[cfg.COLUMNA_ESPACIO].unique())}")
 
     print("\n== Entrenando el GRU ==")
     gru = correr_gru(df, args.implementacion, args.epocas, args.paciencia)
