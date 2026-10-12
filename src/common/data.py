@@ -149,6 +149,9 @@ def split(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         The same rows plus a 'particion' column.
     """
+    if cfg.PARTITION_MODE == "by_days":
+        return split_by_days(df)
+
     parts = []
     for _, group in df.groupby(cfg.SPACE_COLUMN, sort=True):
         group = group.sort_values(cfg.TIME_COLUMN).copy()
@@ -161,6 +164,68 @@ def split(df: pd.DataFrame) -> pd.DataFrame:
         group["partition"] = partition
         parts.append(group)
     return pd.concat(parts, ignore_index=True)
+
+
+def choose_days(dates: list) -> dict:
+    """Decide which calendar days go to validation and test.
+
+    Test takes the latest weekdays and validation the weekdays just before
+    them, as many as the configured fractions ask for and at least one each.
+    Weekend days always stay in training.
+
+    That last rule is what fixes short datasets. A plain chronological cut over
+    one week puts Saturday and Sunday at the end, so the model is scored and
+    early-stopped on an empty building. The prediction that matters is on class
+    days, so that is what validation and test must contain.
+
+    Training may then hold days later than the test days. That is the blocked
+    form of cross-validation, which stays valid for time series as long as no
+    window straddles two blocks; EnvironmentalWindows already rejects any window
+    whose steps fall in different partitions, and midnight, the block boundary,
+    is when the building is empty.
+
+    Args:
+        fechas: Calendar days present in the data.
+
+    Returns:
+        A dict from each day to "entrenamiento", "validacion" or "prueba".
+
+    Reference:
+        Bergmeir, C., Hyndman, R. J., & Koo, B. (2018). A note on the validity
+        of cross-validation for evaluating autoregressive time series
+        prediction. Computational Statistics & Data Analysis, 120, 70-83.
+    """
+    days = sorted(dates)
+    n_test = max(1, round(len(days) * (1 - cfg.TRAIN_FRACTION - cfg.VALIDATION_FRACTION)))
+    n_val = max(1, round(len(days) * cfg.VALIDATION_FRACTION))
+
+    weekdays = [d for d in reversed(days) if pd.Timestamp(d).dayofweek < 5]
+    test = set(weekdays[:n_test])
+    validation = set(weekdays[n_test : n_test + n_val])
+
+    return {
+        d: "test" if d in test else "validation" if d in validation else "train"
+        for d in days
+    }
+
+
+def split_by_days(df: pd.DataFrame) -> pd.DataFrame:
+    """Tag every row by the calendar day it belongs to.
+
+    The same days are used for every space, so all spaces are tested on the
+    same period and the GRU and SARIMAX see identical splits.
+
+    Args:
+        df: Frame on a regular grid.
+
+    Returns:
+        The same rows plus a 'particion' column.
+    """
+    output = df.copy()
+    day = output[cfg.TIME_COLUMN].dt.normalize()
+    assignment = choose_days(list(day.unique()))
+    output["partition"] = day.map(assignment).astype(object)
+    return output
 
 
 # --------------------------------------------------------------------------
@@ -528,3 +593,29 @@ def loaders(
         )
         for name, dataset in datasets.items()
     }
+
+
+# --------------------------------------------------------------------------
+def load_data(path: Path | None = None) -> pd.DataFrame:
+    """Load a frame that satisfies the data contract.
+
+    Args:
+        ruta: A parquet or CSV file. Defaults to the cleaned sensor data
+            written by ingestion.cleaning.
+
+    Returns:
+        The frame, with the timestamp column parsed.
+
+    Raises:
+        FileNotFoundError: If the file does not exist, naming the command that
+            produces it.
+    """
+    path = Path(path) if path else cfg.REAL_DATA
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} does not exist. Clean the raw exports first with "
+            "`python -m ingesta.limpieza ../data/raw/<archivo>.csv`"
+        )
+    if path.suffix == ".parquet":
+        return pd.read_parquet(path)
+    return pd.read_csv(path, parse_dates=[cfg.TIME_COLUMN])

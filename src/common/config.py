@@ -26,6 +26,10 @@ RAW_DATA = ROOT / "data" / "raw"
 PROCESSED_DATA = ROOT / "data" / "processed"
 MODELS = ROOT / "models"
 
+# Cleaned sensor data written by ingestion.cleaning. Every entry point reads this
+# unless told otherwise.
+REAL_DATA = PROCESSED_DATA / "aulas3.parquet"
+
 SEED = 42
 
 # --- Data contract ---------------------------------------------------------
@@ -46,7 +50,7 @@ UNITS = {
     "co2": "ppm",
     "temperature": "C",
     "humidity": "%RH",
-    "light": "lux",
+    "light": "%",
     "motion": "0/1",
 }
 
@@ -57,7 +61,7 @@ PHYSICAL_LIMITS = {
     "co2": (400.0, 5000.0),  # 400 is the NDIR calibration floor, not a reading
     "temperature": (-10.0, 60.0),
     "humidity": (0.0, 100.0),
-    "light": (0.0, None),
+    "light": (0.0, 100.0),  # the nodes report light as a percentage
     "motion": (0.0, 1.0),
 }
 
@@ -122,3 +126,10 @@ MIN_IMPROVEMENT = 1e-5  # smallest validation gain that counts as an improvement
 TRAIN_FRACTION = 0.70
 VALIDATION_FRACTION = 0.15
 # The remaining 0.15 is the test split.
+
+# "by_days" assigns whole calendar days, with validation and test drawn from
+# the latest weekdays; "chronological" cuts each space's series at fixed
+# fractions. With one week of data the chronological cut leaves Saturday and
+# Sunday at the end, so 96% of validation and test fell on an empty building.
+# Reference: Bergmeir, Hyndman & Koo (2018), doi:10.1016/j.csda.2017.11.003.
+PARTITION_MODE = "by_days"

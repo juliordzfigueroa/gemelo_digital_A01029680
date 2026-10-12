@@ -196,7 +196,13 @@ def fit_all(
         for space in spaces:
             grid = grids[space]
             series = grid[variable].to_numpy(dtype=float)
-            training = series[(grid["partition"] == "train").to_numpy()]
+            # Non-training steps become NaN instead of being cut out. Training
+            # days need not be contiguous under the day-based split, and
+            # cutting would both splice distant days together and shift the
+            # phase of the Fourier terms, which are indexed by position. The
+            # Kalman filter skips NaN natively.
+            is_train = (grid["partition"] == "train").to_numpy()
+            training = np.where(is_train, series, np.nan)
 
             t0 = time.time()
             baseline = mod.BaselineSARIMAX(
@@ -213,7 +219,7 @@ def fit_all(
             diagnostics[key] = {
                 "order": baseline.order_summary(),
                 "aic": baseline.aic,
-                "n_train": int(len(training)),
+                "n_train": int(is_train.sum()),
                 "seconds": round(time.time() - t0, 2),
             }
             print(
@@ -230,9 +236,9 @@ def main() -> int:
         Process exit code.
     """
     parser = argparse.ArgumentParser(description="Fit the SARIMAX baseline.")
-    parser.add_argument("--data", default=None)
-    parser.add_argument("--days", type=int, default=20)
-    parser.add_argument("--spaces", type=int, default=2)
+    parser.add_argument(
+        "--data", default=None, help="contract frame; defaults to the cleaned sensor data"
+    )
     parser.add_argument(
         "--seasonality",
         choices=("fourier", "seasonal"),
@@ -248,17 +254,7 @@ def main() -> int:
     if len(order) != 3:
         raise SystemExit(f"--orden needs three values, got {args.order!r}")
 
-    if args.data:
-        raw_df = (
-            pd.read_parquet(args.data)
-            if args.data.endswith(".parquet")
-            else pd.read_csv(args.data, parse_dates=[cfg.TIME_COLUMN])
-        )
-    else:
-        from common import synthetic
-
-        print(f"Sin --datos: generando {args.days} dias sinteticos.")
-        raw_df = synthetic.generate(days=args.days, n_spaces=args.spaces)
+    raw_df = dat.load_data(args.data)
 
     df, _ = dat.preprocess(raw_df)
     grids = grid_by_space(df)
