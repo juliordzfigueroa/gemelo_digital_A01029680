@@ -1,0 +1,34 @@
+# Gemelo Digital Aulas 3 — dependencias
+#
+# Versiones exactas con las que corre el prototipo en la maquina de
+# desarrollo. Instalar con el entorno virtual activado:
+#
+#     pip install -r requirements.txt
+#
+# PyTorch NO esta en esta lista a proposito. La rueda con CUDA vive en un
+# indice aparte y el sufijo +cu128 depende del driver de cada maquina, asi que
+# va en su propio comando, antes de este archivo:
+#
+#     pip install torch --index-url https://download.pytorch.org/whl/cu128
+#
+# Sin GPU NVIDIA, `pip install torch` a secas instala la build de CPU y todo
+# el pipeline corre igual. Ver la seccion "Instalacion desde cero" del README.
+#
+# Version instalada aqui: torch==2.11.0+cu128
+
+# --- Modelo predictivo -----------------------------------------------------
+pandas==3.0.6
+numpy==2.5.2
+scikit-learn==1.9.1
+statsmodels==0.15.0
+pyarrow==25.0.1
+matplotlib==3.11.2
+
+# --- Capa conversacional y API ---------------------------------------------
+fastapi==0.143.0
+uvicorn==0.54.0
+httpx==0.28.1
+pydantic==2.14.1
+
+# Llama 3.1 8B no se instala con pip: corre en Ollama, que es un servicio
+# aparte. Ver src/llm/README.md.
