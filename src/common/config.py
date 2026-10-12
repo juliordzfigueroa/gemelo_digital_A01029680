@@ -30,6 +30,15 @@ MODELS = ROOT / "models"
 # unless told otherwise.
 REAL_DATA = PROCESSED_DATA / "aulas3.parquet"
 
+# Outdoor weather for the same period, written by ingestion.weather.
+WEATHER_DATA = PROCESSED_DATA / "weather.parquet"
+
+# Campus location, for weather queries and solar position. The sensor
+# timestamps are local time, so weather is requested in the same zone.
+LATITUDE = 19.3593
+LONGITUDE = -99.2588
+TIMEZONE = "America/Mexico_City"
+
 SEED = 42
 
 # --- Data contract ---------------------------------------------------------
