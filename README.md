@@ -153,6 +153,17 @@ Acepta varios archivos a la vez. Escribe `data/processed/aulas3.parquet` y
 `aulas3_reporte.json`, con cada valor descartado y por qué. Al final imprime
 una tabla por espacio; hoy hay cuatro útiles: 206, 208, 305 y 308.
 
+Después, el clima exterior de esas mismas fechas:
+
+```powershell
+python -m ingesta.clima
+```
+
+Descarga de [Open-Meteo](https://open-meteo.com/) (gratuito, sin clave) la
+temperatura, humedad, radiación solar y nubosidad del campus, hora por hora,
+y lo deja en intervalos de 5 minutos en `data/processed/clima.parquet`. Imprime
+la comparación interior contra exterior por salón. Necesita internet.
+
 ### 2. Que la red aprende
 
 ```powershell

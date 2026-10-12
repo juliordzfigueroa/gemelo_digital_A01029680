@@ -30,6 +30,15 @@ MODELOS = RAIZ / "models"
 # unless told otherwise.
 DATOS_REALES = DATOS_PROCESADOS / "aulas3.parquet"
 
+# Outdoor weather for the same period, written by ingesta.clima.
+DATOS_CLIMA = DATOS_PROCESADOS / "clima.parquet"
+
+# Campus location, for weather queries and solar position. The sensor
+# timestamps are local time, so weather is requested in the same zone.
+LATITUD = 19.3593
+LONGITUD = -99.2588
+ZONA_HORARIA = "America/Mexico_City"
+
 SEMILLA = 42
 
 # --- Data contract ---------------------------------------------------------
