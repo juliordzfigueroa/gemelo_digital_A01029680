@@ -153,8 +153,13 @@ Con el entorno ya activado:
 ```powershell
 python -m pip install --upgrade pip
 pip install torch --index-url https://download.pytorch.org/whl/cu128
-pip install pandas numpy scikit-learn statsmodels matplotlib pyarrow
+pip install -r requirements.txt
 ```
+
+PyTorch va en su propio comando y **no** está en `requirements.txt`: la rueda
+con CUDA vive en un índice aparte y el sufijo `+cu128` depende del driver de
+cada máquina, así que fijarlo en el archivo rompería la instalación en una
+computadora distinta.
 
 **Cuidado con `cu128`.** Ese índice corresponde a CUDA 12.8, que es lo que
 soporta el driver de la máquina donde se desarrolló; en otra computadora puede no
@@ -184,6 +189,10 @@ exacto:
 | `scikit-learn` | 1.9.1 | Utilidades de partición |
 | `pyarrow` | 25.0.1 | Leer y escribir Parquet |
 | `matplotlib` | 3.11.2 | Gráficas |
+| `fastapi` | 0.143.0 | El orquestador |
+| `uvicorn` | 0.54.0 | Servidor que corre la API |
+| `httpx` | 0.28.1 | Cliente HTTP hacia Ollama |
+| `pydantic` | 2.14.1 | Validación de los cuerpos de petición |
 
 ### 7. Comprobar que quedó bien
 
@@ -342,6 +351,70 @@ python -m gru.entrenar --datos ../data/raw/aulas3.parquet
 
 ---
 
+## Capa conversacional (GRU + Llama 3.1)
+
+Implementa la sección 4.3: patrón RAG, con el GRU y la base de datos
+produciendo los números y Llama 3.1 8B solo redactando la frase. Detalles de
+diseño en [src/llm/README.md](src/llm/README.md).
+
+### Predecir desde la línea de comandos
+
+No necesita la API ni Ollama. Carga el checkpoint de `models/` y predice un
+espacio:
+
+```powershell
+python -m gru.predecir --espacio 1 --horizonte 30     # directo, una pasada
+python -m gru.predecir --espacio 3 --horizonte 120    # iterativo, 4 pasadas
+```
+
+### Ver el ruteo de preguntas
+
+```powershell
+python -m llm.clasificador      # tabla de intención por pregunta de ejemplo
+python -m llm.contexto          # los prompts que se arman para cada tipo
+```
+
+### Instalar Ollama y el modelo
+
+```powershell
+# Descargar de https://ollama.com/download/windows, luego:
+ollama --version
+ollama pull llama3.1:8b         # ~5 GB
+python -m llm.cliente_llm       # sondea y pregunta algo con datos conocidos
+```
+
+### Correr la API
+
+```powershell
+uvicorn api.api:app --port 8000
+```
+
+| Endpoint | Para qué |
+|---|---|
+| `GET /health` | Estado del GRU, de los datos y de Ollama |
+| `POST /chat` | Pregunta en lenguaje natural, respuesta redactada |
+| `POST /contexto` | La cadena completa **sin** llamar al LLM: devuelve el prompt |
+| `GET /docs` | Interfaz interactiva que genera FastAPI |
+
+`/contexto` es el que sirve para la demo sin Ollama instalado, y para separar
+la culpa cuando una respuesta sale mal: si el prompt ya traía el dato
+equivocado, el problema está en la recuperación y no en el modelo.
+
+```powershell
+curl http://localhost:8000/health
+```
+
+### Lo que todavía no está conectado
+
+| Pieza | Estado |
+|---|---|
+| GRU, predicción directa e iterativa | real, desde `models/gru.pt` |
+| Clasificación y construcción de prompts | real |
+| Fuente de datos | **sintética**, en memoria. `TODO E5` en `api/api.py` |
+| Detector de anomalías 3σ | **no existe**; la API lo dice en vez de responder que no hay nada |
+
+---
+
 ## Dónde se muestran los resultados
 
 ### En pantalla
@@ -390,18 +463,21 @@ cuando un nodo pierde la red.
 
 ```
 src/comun/        contrato de datos, ventanas, normalización, métricas
-src/gru/          modelo predictivo (ver src/gru/README.md)
+src/gru/          modelo predictivo y predicción (ver src/gru/README.md)
 src/sarimax/      baseline estadístico
+src/llm/          clasificador, prompts y cliente de Ollama (ver src/llm/README.md)
+src/api/          orquestador FastAPI
 src/comparar_modelos.py   GRU contra SARIMAX sobre las mismas ventanas
 docs/             estándar de código, hallazgos de ROBOD
 data/raw/         datos de entrada (no versionados)
 data/processed/   datos derivados (no versionados)
 models/           pesos y metadatos (no versionados)
+requirements.txt  dependencias, menos torch
 check_gpu.py      diagnóstico de CUDA
 ```
 
-Pendientes: `src/anomalias/` (detector 3σ), `src/llm/` (Llama 3.1) y
-`src/api/` (FastAPI).
+Pendiente: `src/anomalias/` (detector 3σ), que es lo único que le falta a la
+API para estar completa.
 
 ---
 
@@ -410,6 +486,7 @@ Pendientes: `src/anomalias/` (detector 3σ), `src/llm/` (Llama 3.1) y
 | Documento | Contenido |
 |---|---|
 | [src/gru/README.md](src/gru/README.md) | Decisiones de diseño del modelo y qué queda abierto |
+| [src/llm/README.md](src/llm/README.md) | Reparto de trabajo con el LLM, por qué el clasificador no lo usa, y qué no está conectado |
 | [src/sarimax/README.md](src/sarimax/README.md) | Qué es y qué no es el baseline, y por qué no `s=288` |
 | [docs/estandar_codigo.md](docs/estandar_codigo.md) | Convención de documentación del código |
 | [docs/hallazgos_robod.md](docs/hallazgos_robod.md) | Evaluación descartada de ROBOD y qué defectos reaparecerán con los sensores propios |
