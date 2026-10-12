@@ -26,6 +26,10 @@ DATOS_CRUDOS = RAIZ / "data" / "raw"
 DATOS_PROCESADOS = RAIZ / "data" / "processed"
 MODELOS = RAIZ / "models"
 
+# Cleaned sensor data written by ingesta.limpieza. Every entry point reads this
+# unless told otherwise.
+DATOS_REALES = DATOS_PROCESADOS / "aulas3.parquet"
+
 SEMILLA = 42
 
 # --- Data contract ---------------------------------------------------------
@@ -46,7 +50,7 @@ UNIDADES = {
     "co2": "ppm",
     "temperatura": "C",
     "humedad": "%RH",
-    "luz": "lux",
+    "luz": "%",
     "movimiento": "0/1",
 }
 
@@ -57,7 +61,7 @@ LIMITES_FISICOS = {
     "co2": (400.0, 5000.0),  # 400 is the NDIR calibration floor, not a reading
     "temperatura": (-10.0, 60.0),
     "humedad": (0.0, 100.0),
-    "luz": (0.0, None),
+    "luz": (0.0, 100.0),  # the nodes report light as a percentage
     "movimiento": (0.0, 1.0),
 }
 
@@ -122,3 +126,10 @@ MIN_MEJORA = 1e-5  # smallest validation gain that counts as an improvement
 FRACCION_ENTRENAMIENTO = 0.70
 FRACCION_VALIDACION = 0.15
 # The remaining 0.15 is the test split.
+
+# "por_dias" assigns whole calendar days, with validation and test drawn from
+# the latest weekdays; "cronologica" cuts each space's series at fixed
+# fractions. With one week of data the chronological cut leaves Saturday and
+# Sunday at the end, so 96% of validation and test fell on an empty building.
+# Reference: Bergmeir, Hyndman & Koo (2018), doi:10.1016/j.csda.2017.11.003.
+MODO_PARTICION = "por_dias"

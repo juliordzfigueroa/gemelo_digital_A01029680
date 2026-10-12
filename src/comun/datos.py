@@ -149,6 +149,9 @@ def particionar(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         The same rows plus a 'particion' column.
     """
+    if cfg.MODO_PARTICION == "por_dias":
+        return particionar_por_dias(df)
+
     partes = []
     for _, grupo in df.groupby(cfg.COLUMNA_ESPACIO, sort=True):
         grupo = grupo.sort_values(cfg.COLUMNA_TIEMPO).copy()
@@ -161,6 +164,68 @@ def particionar(df: pd.DataFrame) -> pd.DataFrame:
         grupo["particion"] = particion
         partes.append(grupo)
     return pd.concat(partes, ignore_index=True)
+
+
+def elegir_dias(fechas: list) -> dict:
+    """Decide which calendar days go to validation and test.
+
+    Test takes the latest weekdays and validation the weekdays just before
+    them, as many as the configured fractions ask for and at least one each.
+    Weekend days always stay in training.
+
+    That last rule is what fixes short datasets. A plain chronological cut over
+    one week puts Saturday and Sunday at the end, so the model is scored and
+    early-stopped on an empty building. The prediction that matters is on class
+    days, so that is what validation and test must contain.
+
+    Training may then hold days later than the test days. That is the blocked
+    form of cross-validation, which stays valid for time series as long as no
+    window straddles two blocks; VentanasAmbientales already rejects any window
+    whose steps fall in different partitions, and midnight, the block boundary,
+    is when the building is empty.
+
+    Args:
+        fechas: Calendar days present in the data.
+
+    Returns:
+        A dict from each day to "entrenamiento", "validacion" or "prueba".
+
+    Reference:
+        Bergmeir, C., Hyndman, R. J., & Koo, B. (2018). A note on the validity
+        of cross-validation for evaluating autoregressive time series
+        prediction. Computational Statistics & Data Analysis, 120, 70-83.
+    """
+    dias = sorted(fechas)
+    n_prueba = max(1, round(len(dias) * (1 - cfg.FRACCION_ENTRENAMIENTO - cfg.FRACCION_VALIDACION)))
+    n_val = max(1, round(len(dias) * cfg.FRACCION_VALIDACION))
+
+    habiles = [d for d in reversed(dias) if pd.Timestamp(d).dayofweek < 5]
+    prueba = set(habiles[:n_prueba])
+    validacion = set(habiles[n_prueba : n_prueba + n_val])
+
+    return {
+        d: "prueba" if d in prueba else "validacion" if d in validacion else "entrenamiento"
+        for d in dias
+    }
+
+
+def particionar_por_dias(df: pd.DataFrame) -> pd.DataFrame:
+    """Tag every row by the calendar day it belongs to.
+
+    The same days are used for every space, so all spaces are tested on the
+    same period and the GRU and SARIMAX see identical splits.
+
+    Args:
+        df: Frame on a regular grid.
+
+    Returns:
+        The same rows plus a 'particion' column.
+    """
+    salida = df.copy()
+    dia = salida[cfg.COLUMNA_TIEMPO].dt.normalize()
+    asignacion = elegir_dias(list(dia.unique()))
+    salida["particion"] = dia.map(asignacion).astype(object)
+    return salida
 
 
 # --------------------------------------------------------------------------
@@ -528,3 +593,29 @@ def cargadores(
         )
         for nombre, conjunto in conjuntos.items()
     }
+
+
+# --------------------------------------------------------------------------
+def cargar_datos(ruta: Path | None = None) -> pd.DataFrame:
+    """Load a frame that satisfies the data contract.
+
+    Args:
+        ruta: A parquet or CSV file. Defaults to the cleaned sensor data
+            written by ingesta.limpieza.
+
+    Returns:
+        The frame, with the timestamp column parsed.
+
+    Raises:
+        FileNotFoundError: If the file does not exist, naming the command that
+            produces it.
+    """
+    ruta = Path(ruta) if ruta else cfg.DATOS_REALES
+    if not ruta.exists():
+        raise FileNotFoundError(
+            f"{ruta} does not exist. Clean the raw exports first with "
+            "`python -m ingesta.limpieza ../data/raw/<archivo>.csv`"
+        )
+    if ruta.suffix == ".parquet":
+        return pd.read_parquet(ruta)
+    return pd.read_csv(ruta, parse_dates=[cfg.COLUMNA_TIEMPO])

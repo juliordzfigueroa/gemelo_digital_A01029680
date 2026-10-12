@@ -196,7 +196,13 @@ def ajustar_todo(
         for espacio in espacios:
             rejilla = rejillas[espacio]
             serie = rejilla[variable].to_numpy(dtype=float)
-            entrenamiento = serie[(rejilla["particion"] == "entrenamiento").to_numpy()]
+            # Non-training steps become NaN instead of being cut out. Training
+            # days need not be contiguous under the day-based split, and
+            # cutting would both splice distant days together and shift the
+            # phase of the Fourier terms, which are indexed by position. The
+            # Kalman filter skips NaN natively.
+            es_entrenamiento = (rejilla["particion"] == "entrenamiento").to_numpy()
+            entrenamiento = np.where(es_entrenamiento, serie, np.nan)
 
             t0 = time.time()
             baseline = mod.BaselineSARIMAX(
@@ -213,7 +219,7 @@ def ajustar_todo(
             diagnostico[clave] = {
                 "orden": baseline.resumen_orden(),
                 "aic": baseline.aic,
-                "n_entrenamiento": int(len(entrenamiento)),
+                "n_entrenamiento": int(es_entrenamiento.sum()),
                 "segundos": round(time.time() - t0, 2),
             }
             print(
@@ -230,9 +236,9 @@ def main() -> int:
         Process exit code.
     """
     parser = argparse.ArgumentParser(description="Fit the SARIMAX baseline.")
-    parser.add_argument("--datos", default=None)
-    parser.add_argument("--dias", type=int, default=20)
-    parser.add_argument("--espacios", type=int, default=2)
+    parser.add_argument(
+        "--datos", default=None, help="contract frame; defaults to the cleaned sensor data"
+    )
     parser.add_argument(
         "--estacionalidad",
         choices=("fourier", "estacional"),
@@ -248,17 +254,7 @@ def main() -> int:
     if len(orden) != 3:
         raise SystemExit(f"--orden needs three values, got {args.orden!r}")
 
-    if args.datos:
-        df_crudo = (
-            pd.read_parquet(args.datos)
-            if args.datos.endswith(".parquet")
-            else pd.read_csv(args.datos, parse_dates=[cfg.COLUMNA_TIEMPO])
-        )
-    else:
-        from comun import sintetico
-
-        print(f"Sin --datos: generando {args.dias} dias sinteticos.")
-        df_crudo = sintetico.genera(dias=args.dias, n_espacios=args.espacios)
+    df_crudo = dat.cargar_datos(args.datos)
 
     df, _ = dat.preprocesar(df_crudo)
     rejillas = rejilla_por_espacio(df)
