@@ -214,10 +214,6 @@ def invalidate(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             outside |= df[variable] < lower
         if upper is not None:
             outside |= df[variable] > upper
-        if variable == "light":
-            # Real nodes report light as a percentage, so it is bounded above
-            # even though the synthetic lux scale in config is not.
-            outside |= df[variable] > 100
         mark(outside & df[variable].notna(), variable, "out_of_range")
 
     return df, counts

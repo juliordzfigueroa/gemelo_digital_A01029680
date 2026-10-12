@@ -317,6 +317,49 @@ def save(output: dict, folder: Path = cfg.MODELS, label: str = "gru") -> None:
     )
 
 
+def known_series(days: int = 20, n_spaces: int = 2) -> pd.DataFrame:
+    """Build a clean, deterministic series whose structure is known exactly.
+
+    Classes run on weekdays from 8:00 to 14:00. CO2 follows the occupancy with
+    a first-order lag, temperature and humidity follow a daily cycle plus the
+    occupancy, light follows daylight, and movement is the occupancy itself.
+    No noise and no gaps: a network that cannot fit this has a bug.
+
+    Args:
+        dias: Length of the series in days, starting on a Monday.
+        n_spaces: How many spaces, each with a different CO2 amplitude so
+            the space embedding has something to learn.
+
+    Returns:
+        A frame satisfying the data contract.
+    """
+    stamps = pd.date_range("2026-01-05", periods=days * 288, freq="5min")
+    hour = np.asarray(stamps.hour + stamps.minute / 60)
+    weekday = np.asarray(stamps.dayofweek < 5)
+    occupancy = (weekday & (hour >= 8) & (hour < 14)).astype(float)
+    cycle = np.sin(2 * np.pi * (hour - 9) / 24)
+    sun = np.clip(np.sin(np.pi * (hour - 7) / 12), 0, None)
+
+    parts = []
+    for space in range(1, n_spaces + 1):
+        target = 420 + 600 * (1 + 0.3 * (space - 1)) * occupancy
+        co2 = np.empty_like(target)
+        level = 420.0
+        for i, goal in enumerate(target):
+            level += 0.08 * (goal - level)
+            co2[i] = level
+        parts.append(pd.DataFrame({
+            cfg.TIME_COLUMN: stamps,
+            cfg.SPACE_COLUMN: space,
+            "co2": co2,
+            "temperature": 22 + 1.5 * cycle + (co2 - 420) / 600,
+            "humidity": 50 - 4 * cycle + 3 * occupancy,
+            "light": np.clip(70 * sun + 20 * occupancy, 0, 100),
+            "motion": occupancy,
+        }))
+    return pd.concat(parts, ignore_index=True)
+
+
 def implementation_check(implementation: str = cfg.GRU_IMPLEMENTATION) -> int:
     """Check that the network can learn something whose answer is known.
 
@@ -333,10 +376,8 @@ def implementation_check(implementation: str = cfg.GRU_IMPLEMENTATION) -> int:
     Returns:
         Process exit code: 0 when the network learns, 1 when it does not.
     """
-    from common import synthetic
-
-    print("== Prueba de implementacion: serie sintetica sin huecos, 20 dias ==")
-    df = synthetic.generate(days=20, n_spaces=2, with_gaps=False)
+    print("== Prueba de implementacion: serie conocida sin ruido ni huecos, 20 dias ==")
+    df = known_series()
     output = train(
         df, epochs=30, patience=8, quiet=False, implementation=implementation
     )
@@ -369,10 +410,8 @@ def main() -> int:
         "--data",
         type=Path,
         default=None,
-        help="parquet or csv satisfying the data contract; synthetic if omitted",
-    )
-    parser.add_argument(
-        "--days", type=int, default=60, help="days to generate when --datos is absent"
+        help="parquet or csv satisfying the data contract; defaults to the "
+        "cleaned sensor data",
     )
     parser.add_argument("--epochs", type=int, default=cfg.MAX_EPOCHS)
     parser.add_argument("--patience", type=int, default=cfg.PATIENCE)
@@ -398,15 +437,8 @@ def main() -> int:
     if args.known_series_test:
         return implementation_check(args.implementation)
 
-    if args.data is None:
-        from common import synthetic
-
-        print(f"Sin --datos: generando {args.days} dias sinteticos.")
-        df = synthetic.generate(days=args.days)
-    elif args.data.suffix == ".parquet":
-        df = pd.read_parquet(args.data)
-    else:
-        df = pd.read_csv(args.data, parse_dates=[cfg.TIME_COLUMN])
+    df = dat.load_data(args.data)
+    print(f"Datos: {len(df):,} filas, espacios {sorted(df[cfg.SPACE_COLUMN].unique())}")
 
     output = train(
         df,

@@ -327,6 +327,42 @@ def _normalized_window(
     return features
 
 
+def last_contiguous_window(rows: pd.DataFrame, steps: int) -> pd.DataFrame | None:
+    """Find the most recent run of `pasos` consecutive readings.
+
+    Taking the last N rows is not enough. Readings arrive as missing rows when
+    a node loses the network, so the last 12 rows can span a two-day hole and
+    still look like a valid window. The network would consume it without
+    complaint and forecast from a sequence that never happened.
+
+    Args:
+        filas: Rows of one space, sorted by time.
+        pasos: How many consecutive readings are needed.
+
+    Returns:
+        The last window whose steps are exactly one sampling interval apart,
+        or None if the history holds no such run.
+    """
+    if len(rows) < steps:
+        return None
+
+    step = pd.Timedelta(seconds=cfg.INTERVAL_SECONDS)
+    stamps = pd.to_datetime(rows[cfg.TIME_COLUMN])
+    contiguous = stamps.diff() == step
+
+    # Walk backwards: the first window that is fully contiguous and complete
+    # is the freshest usable one.
+    for end in range(len(rows), steps - 1, -1):
+        start = end - steps
+        window = rows.iloc[start:end]
+        if not contiguous.iloc[start + 1 : end].all():
+            continue
+        if window[cfg.ACTIVE_VARIABLES].isna().to_numpy().any():
+            continue
+        return window
+    return None
+
+
 def predict(
     net: mod.EnvironmentalGRU,
     normalizer: Normalizer,
@@ -454,7 +490,7 @@ def predict(
 
 
 def main() -> int:
-    """Forecast one space from synthetic data and print the result.
+    """Forecast one space from the cleaned sensor data and print the result.
 
     Exists so the module can be exercised without the API on top, which is how
     a broken checkpoint or a stale metadata file gets caught early.
@@ -464,12 +500,14 @@ def main() -> int:
     """
     import argparse
 
-    from common import synthetic
+    from common import data as dat
 
     parser = argparse.ArgumentParser(description="Forecast one space.")
-    parser.add_argument("--space", type=int, default=1)
+    parser.add_argument("--space", type=int, default=308)
     parser.add_argument("--horizon", type=int, default=30)
-    parser.add_argument("--days", type=int, default=3)
+    parser.add_argument(
+        "--data", default=None, help="contract frame; defaults to the cleaned sensor data"
+    )
     args = parser.parse_args()
 
     net, normalizer, metadata = load_model()
@@ -479,11 +517,15 @@ def main() -> int:
         f"espacios {sorted(int(k) for k in metadata['space_index'])}"
     )
 
-    df = synthetic.generate(days=args.days, n_spaces=5)
+    df = dat.load_data(args.data)
     own = df[df[cfg.SPACE_COLUMN] == args.space].sort_values(
         cfg.TIME_COLUMN
-    )
-    window = own.tail(metadata["input_steps"])
+    ).reset_index(drop=True)
+    window = last_contiguous_window(own, metadata["input_steps"])
+    if window is None:
+        print(f"El espacio {args.space} no tiene una hora de lecturas consecutivas.")
+        return 1
+    print(f"Ventana: {window[cfg.TIME_COLUMN].iloc[0]} a {window[cfg.TIME_COLUMN].iloc[-1]}")
 
     output = predict(
         net,
