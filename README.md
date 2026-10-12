@@ -14,7 +14,7 @@ Julio César Rodríguez Figueroa — A01029680
 | **GRU** | Predice CO₂, temperatura, humedad, luz y movimiento hasta 2 h adelante | listo |
 | **SARIMAX** | Baseline estadístico contra el que se compara el GRU | listo |
 | **LLM** | Llama 3.1 8B vía Ollama: redacta respuestas con los datos del GRU | listo, falta probar con Ollama |
-| **API** | FastAPI: recibe la pregunta, consulta al GRU, le pide la frase al LLM | lista, con datos sintéticos |
+| **API** | FastAPI: recibe la pregunta, consulta al GRU, le pide la frase al LLM | lista, con datos reales limpios |
 | Detector de anomalías 3σ | | pendiente |
 
 El GRU es de dos capas [128, 64], con un ID de espacio como rasgo para que un
@@ -22,9 +22,10 @@ solo modelo sirva a todo el edificio. Su celda recurrente está escrita a mano
 siguiendo las ecuaciones 1 a 4 de la sección 4.2.7.2 del documento de
 investigación.
 
-Los sensores de Aulas 3 todavía no existen. Todo se desarrolla contra **datos
-sintéticos** con la misma forma y los mismos defectos que tendrán los reales; el
-día que lleguen, lo que cambia es el argumento `--datos` y la fuente de la API.
+Todo se entrena y se evalúa con **datos reales** de los sensores de Aulas 3
+(desde el 1 de octubre de 2026): cuatro salones útiles, 3206, 3208, 3305 y
+3308. La API los lee del archivo limpio mientras no haya acceso a la base de
+datos del Tec.
 
 ---
 
@@ -94,13 +95,14 @@ NVIDIA**, usa `pip install torch` a secas: todo corre igual en CPU, más lento.
 python check_gpu.py
 ```
 
-**Entrenar el modelo.** Este paso es obligatorio en un clon nuevo: los pesos no
-se versionan, así que `models/` llega vacío y sin modelo no hay predicción ni
-API.
+**Datos y modelo.** Obligatorio en un clon nuevo: ni los datos de los sensores
+ni los pesos se versionan, así que `data/` y `models/` llegan vacíos. Copia la
+exportación de los sensores y el horario a `data/raw/`, y luego:
 
 ```powershell
 cd src
-python -m gru.entrenar --dias 60 --implementacion pytorch
+python -m ingesta.limpieza "../data/raw/1 oct a 11 octubre 2026.csv"
+python -m gru.entrenar --implementacion pytorch
 ```
 
 Deja tres archivos en `models/`: `gru.pt`, `gru_normalizador.json` y
@@ -142,7 +144,8 @@ Todo desde `src/`, con el entorno activado y el modelo ya entrenado.
 python -m gru.entrenar --prueba-sintetica --implementacion pytorch
 ```
 
-Entrena con una serie limpia cuya respuesta se conoce. Debe terminar con
+Entrena con una serie determinista, sin ruido ni huecos, cuya respuesta se
+conoce. Debe terminar con
 `OK: la red aprende la estructura de una serie conocida.` Si falla, el problema
 está en el código, no en los datos.
 
@@ -186,10 +189,9 @@ mandaría a Llama. No necesita Ollama.
 Desde `src/`.
 
 ```powershell
-python -m comun.sintetico --dias 20 --espacios 2                     # generar e inspeccionar datos
 python -m gru.entrenar --prueba-sintetica --implementacion pytorch   # la red aprende
-python -m sarimax.entrenar --dias 20 --espacios 2                    # baseline
-python comparar_modelos.py --dias 20 --espacios 2                    # GRU contra SARIMAX
+python -m sarimax.entrenar                                           # baseline
+python comparar_modelos.py                                           # GRU contra SARIMAX
 ```
 
 La comparación entrena los dos modelos y los evalúa sobre las mismas ventanas
@@ -259,15 +261,13 @@ Diseño de esta capa en [src/llm/README.md](src/llm/README.md).
 
 ```powershell
 python -m gru.comparar_implementaciones                  # celda a mano contra nn.GRU
-python -m gru.entrenar --datos ../data/raw/aulas3.parquet  # con datos reales
 python -m llm.clasificador                               # cómo se rutean las preguntas
 python -m llm.contexto                                   # los prompts por tipo
 ```
 
 | Opción | Para qué |
 |---|---|
-| `--dias N` | Días de datos sintéticos |
-| `--espacios N` | Espacios a simular (no aplica a `gru.entrenar`, que usa 5) |
+| `--datos ruta` | Otro archivo con el contrato de datos; por omisión `data/processed/aulas3.parquet` |
 | `--epocas N` / `--paciencia N` | Tope de épocas y épocas sin mejora antes de parar |
 | `--implementacion pytorch` | `nn.GRU` en vez de la celda a mano |
 | `--normalizar-por-espacio` | Media y sigma por espacio en vez de globales |
@@ -304,7 +304,7 @@ Cualquier fuente de datos debe entregar un DataFrame con estas columnas:
 | `co2` | float | ppm |
 | `temperatura` | float | °C |
 | `humedad` | float | %RH |
-| `luz` | float | lux |
+| `luz` | float | % (0–100) |
 | `movimiento` | float | 0 o 1 |
 
 Los huecos se expresan como **filas ausentes**, no como NaN: es lo que pasa
@@ -342,8 +342,13 @@ check_gpu.py      diagnóstico de CUDA
 
 ## Advertencia sobre los resultados
 
-Las métricas de hoy se calculan sobre datos sintéticos: miden qué tan bien el
-GRU aprende un generador escrito para este repositorio, así que son
-**circulares por construcción** y no son un resultado de desempeño. Sirven para
-verificar que el pipeline corre y que la red aprende estructura temporal. El
-desempeño real se mide con los datos de Aulas 3.
+Las métricas de hoy salen de **una semana de datos reales**: unos 4 días de
+entrenamiento, un jueves de validación y un viernes de prueba. Sirven para
+verificar que el pipeline funciona con sensores reales, no como resultado de
+desempeño. Con esta cantidad de datos SARIMAX le gana al GRU en las cinco
+variables; la comparación que vale es la que se haga con varias semanas.
+
+La validación y la prueba se toman de días completos entre semana
+(`MODO_PARTICION = "por_dias"` en `config.py`), porque un corte cronológico
+sobre una sola semana dejaba el fin de semana al final y calificaba al modelo
+con el edificio vacío.
