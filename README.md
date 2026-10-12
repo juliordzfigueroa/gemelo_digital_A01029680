@@ -203,6 +203,32 @@ que es ~14× más lenta.
 
 ---
 
+## Datos reales
+
+Las exportaciones de los sensores van a `data/raw/` (no se versionan). Desde
+`src/`:
+
+```powershell
+python -m ingesta.limpieza "../data/raw/1 oct a 11 octubre 2026.csv"   # acepta varios archivos
+python -m ingesta.horarios "../data/raw/horarios.csv"                  # horario contra sensores
+python -m gru.entrenar --datos ../data/processed/aulas3.parquet        # entrenar con datos reales
+```
+
+La limpieza escribe `data/processed/aulas3.parquet` en el formato del contrato
+de datos y un `aulas3_reporte.json` con cada lectura descartada y por qué. Qué
+dispositivo mide qué espacio está en [config/sensores.csv](config/sensores.csv),
+y los espacios del edificio en [config/espacios.json](config/espacios.json).
+
+Diferencias con el contrato que hay que tener presentes:
+
+| Variable | En los sensores reales |
+|---|---|
+| `co2` | eCO₂ **estimado** por un sensor MOX, no CO₂ medido: sube con productos de limpieza y no baja a ~420 ppm de noche |
+| `luz` | porcentaje (0–100), no lux |
+| `movimiento` | fracción del intervalo de 5 min con detección, entre 0 y 1 |
+
+---
+
 ## La API
 
 ```powershell
