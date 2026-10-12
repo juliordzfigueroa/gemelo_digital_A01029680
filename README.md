@@ -1,7 +1,7 @@
 # Gemelo Digital Aulas 3
 
 Prototipo técnico del gemelo digital del edificio Aulas 3, Tec de Monterrey
-Campus Santa Fe. Modelo GRU para predicción de variables ambientales.
+Campus Santa Fe.
 
 Julio César Rodríguez Figueroa — A01029680
 
@@ -9,378 +9,201 @@ Julio César Rodríguez Figueroa — A01029680
 
 ## Qué hay ahora
 
-Implementado el modelo predictivo (parte 1 de la investigación): un GRU de dos
-capas [128, 64] que predice CO₂, temperatura, humedad, luz y movimiento 30
-minutos hacia adelante a partir de una hora de contexto, con un ID de espacio
-como rasgo para que un solo modelo sirva a todo el edificio.
+| Componente | Qué hace | Estado |
+|---|---|---|
+| **GRU** | Predice CO₂, temperatura, humedad, luz y movimiento hasta 2 h adelante | listo |
+| **SARIMAX** | Baseline estadístico contra el que se compara el GRU | listo |
+| **LLM** | Llama 3.1 8B vía Ollama: redacta respuestas con los datos del GRU | listo, falta probar con Ollama |
+| **API** | FastAPI: recibe la pregunta, consulta al GRU, le pide la frase al LLM | lista, con datos sintéticos |
+| Detector de anomalías 3σ | | pendiente |
 
-La celda recurrente está escrita a mano siguiendo las ecuaciones 1 a 4 de la
-sección 4.2.7.2 del documento de investigación, en vez de usar `nn.GRU`, que
-implementa una variante distinta. Así las ecuaciones que publica la tesis son
-las que producen los resultados.
+El GRU es de dos capas [128, 64], con un ID de espacio como rasgo para que un
+solo modelo sirva a todo el edificio. Su celda recurrente está escrita a mano
+siguiendo las ecuaciones 1 a 4 de la sección 4.2.7.2 del documento de
+investigación.
 
-Los sensores de Aulas 3 todavía no existen: se recolectan durante dos meses. El
-pipeline se desarrolla contra **datos sintéticos** generados para tener la
-misma forma y los mismos defectos que tendrán los reales. El día que lleguen,
-lo único que cambia es el argumento `--datos`.
-
----
-
-## Requisitos
-
-- **Python 3.10 a 3.14.** Desarrollado y verificado con 3.12.10
-- Git
-- GPU NVIDIA con CUDA (opcional; todo corre en CPU, solo más lento)
+Los sensores de Aulas 3 todavía no existen. Todo se desarrolla contra **datos
+sintéticos** con la misma forma y los mismos defectos que tendrán los reales; el
+día que lleguen, lo que cambia es el argumento `--datos` y la fuente de la API.
 
 ---
 
-## Instalación desde cero
+## Instalación
 
-Para una máquina donde el repositorio nunca se ha clonado.
+Tres partes, en orden. La primera es para todo; las otras dos, según lo que
+quieras correr.
 
-### 1. Instalar Python
+| Para correr… | Necesitas |
+|---|---|
+| Entrenamiento, predicción, SARIMAX | 1 y 2 |
+| La API sin LLM (`/contexto`) | 1 y 2 |
+| La API completa (`/chat`) | 1, 2 y 3 |
 
-Descarga el instalador de Windows desde
-[python.org/downloads](https://www.python.org/downloads/windows/).
+### 1. Base: Python, repositorio y entorno
 
-En la primera pantalla del instalador, **marca la casilla
-`Add python.exe to PATH`** antes de darle a instalar. Es la causa más común de
-que después `python` no se encuentre en la terminal, y corregirlo luego es más
-molesto que marcarla a tiempo. Deja también activado el `py launcher`, que viene
-marcado por omisión y es lo que permite tener varias versiones conviviendo.
-
-Comprueba que quedó, en una terminal nueva:
+**Python 3.10 a 3.14** (desarrollado con 3.12.10). Instalador de
+[python.org](https://www.python.org/downloads/windows/): en la primera pantalla
+**marca `Add python.exe to PATH`**. Comprueba en una terminal nueva:
 
 ```powershell
 py --list
-python --version
 ```
 
-`py --list` muestra todas las versiones instaladas. Si abriste la terminal antes
-de instalar, ciérrala y abre otra: el `PATH` se lee al arrancar.
-
-**Sobre la versión.** Este proyecto se desarrolló y se verificó con 3.12.10,
-pero **3.14 también sirve**: PyTorch 2.11 soporta Python 3.10 a 3.14 en Windows,
-y CUDA 12.8 —el `cu128` del paso 6— está en su lista de versiones estables.
-
-Si alguna dependencia se queja de que no hay *wheel* para tu versión e intenta
-compilar desde el código fuente, no pelees con eso en Windows: instala 3.12
-junto a la que ya tienes y crea el entorno con ella. Las versiones de Python
-conviven sin estorbarse, y el paso 4 explica cómo elegir cuál se usa.
-
-> Referencia: [matriz de compatibilidad de PyTorch](https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix)
-
-### 2. Elegir dónde va a vivir el repositorio
-
-Muévete a la carpeta donde lo quieras antes de clonar, porque `git clone` crea
-la carpeta del proyecto **dentro de donde estés parado**.
-
-| Qué quieres | Comando |
-|---|---|
-| Ver en qué carpeta estás | `pwd` |
-| Listar lo que hay ahí | `ls` |
-| Entrar a una carpeta | `cd Proyectos` |
-| Subir un nivel | `cd ..` |
-| **Cambiar de disco** | `cd D:\` |
-| Cambiar de disco y carpeta de una vez | `cd D:\Proyectos\Tec` |
-| Ver qué discos existen | `Get-PSDrive -PSProvider FileSystem` |
-
-**En PowerShell, `cd D:\Proyectos` cambia de disco y de carpeta en un solo
-paso.** Esto es distinto de `cmd`, donde `cd` no cambia de unidad y hay que usar
-`cd /d D:\Proyectos` o escribir `D:` solo en una línea. Si alguna vez te topaste
-con que `cd` "no hacía nada" al cambiar de disco, era `cmd`, no PowerShell.
-
-Si la ruta tiene espacios, va entre comillas: `cd "D:\Mis Proyectos"`.
-
-### 3. Clonar el repositorio
+Muévete a donde quieras el repositorio y clónalo. En PowerShell, `cd D:\ruta`
+cambia de disco y de carpeta en un solo paso.
 
 ```powershell
+cd D:\Proyectos
 git clone git@github.com:juliordzfigueroa/gemelo_digital_A01029680.git
 cd gemelo_digital_A01029680
 ```
 
-Con HTTPS en lugar de SSH, si esa máquina no tiene llave configurada:
+Crea y activa el entorno virtual:
 
 ```powershell
-git clone https://github.com/juliordzfigueroa/gemelo_digital_A01029680.git
-```
-
-Las carpetas `data/raw/`, `data/processed/` y `models/` ya vienen en el clon
-—vacías, con un `.gitkeep`— así que no hay que crearlas a mano. Su contenido no
-se versiona.
-
-### 4. Crear el entorno virtual
-
-```powershell
-py -3.12 -m venv .venv
-```
-
-El `-3.12` elige explícitamente esa versión de entre las que tengas instaladas.
-Para usar la más reciente, `py -m venv .venv`; para 3.14 en concreto,
-`py -3.14 -m venv .venv`. Con `py --list` ves cuáles hay.
-
-El `.venv` vive dentro del repositorio pero está en `.gitignore`, así que nunca
-se sube. Si algo sale mal en los pasos siguientes, se puede borrar la carpeta
-`.venv` y volver a empezar desde aquí sin tocar nada más.
-
-### 5. Activar el entorno
-
-```powershell
+py -3.12 -m venv .venv           # o py -3.14, según la que tengas
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 ```
 
-| Shell | Comando |
-|---|---|
-| PowerShell | `.\.venv\Scripts\Activate.ps1` |
-| `cmd` | `.venv\Scripts\activate.bat` |
-| Git Bash | `source .venv/Scripts/activate` |
-
-Sabes que funcionó porque aparece `(.venv)` al inicio del prompt.
-
-**Si PowerShell contesta `running scripts is disabled on this system`**, está
-bloqueando la ejecución de scripts. La salida sin tocar nada es activar desde
-`cmd` o Git Bash con los comandos de la tabla. Si prefieres arreglarlo de forma
-permanente, esto lo habilita solo para tu usuario y solo para scripts locales:
+Funcionó si el prompt empieza con `(.venv)`. Si PowerShell contesta
+`running scripts is disabled on this system`:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-### 6. Instalar las dependencias
+### 2. Componente GRU
 
-Con el entorno ya activado:
+**Dependencias.** PyTorch va aparte porque su versión con CUDA vive en otro
+índice:
 
 ```powershell
-python -m pip install --upgrade pip
 pip install torch --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 ```
 
-PyTorch va en su propio comando y **no** está en `requirements.txt`: la rueda
-con CUDA vive en un índice aparte y el sufijo `+cu128` depende del driver de
-cada máquina, así que fijarlo en el archivo rompería la instalación en una
-computadora distinta.
+`cu128` corresponde a CUDA 12.8. Si la otra máquina tiene otro driver,
+`nvidia-smi` dice qué versión de CUDA soporta y
+[pytorch.org](https://pytorch.org/get-started/locally/) da el índice. **Sin GPU
+NVIDIA**, usa `pip install torch` a secas: todo corre igual en CPU, más lento.
 
-**Cuidado con `cu128`.** Ese índice corresponde a CUDA 12.8, que es lo que
-soporta el driver de la máquina donde se desarrolló; en otra computadora puede no
-ser el correcto. `nvidia-smi` reporta en la esquina superior derecha la versión
-de CUDA que soporta el driver instalado, y con ese número se elige el índice en
-[pytorch.org/get-started/locally](https://pytorch.org/get-started/locally/).
-
-**Si la máquina no tiene GPU NVIDIA**, omite el `--index-url` por completo:
-
-```powershell
-pip install torch
-```
-
-Eso instala la build de CPU. Todo el pipeline corre igual; el entrenamiento
-completo tarda bastante más, pero los siete pasos de la demo siguen siendo
-cuestión de minutos.
-
-Versiones con las que se desarrolló, por si hace falta reproducir el entorno
-exacto:
-
-| Paquete | Versión | Para qué |
-|---|---|---|
-| `torch` | 2.11.0+cu128 | La red neuronal y el cómputo en GPU |
-| `pandas` | 3.0.6 | Series de tiempo, agregación, ventanas |
-| `numpy` | 2.5.2 | Operaciones numéricas y métricas |
-| `statsmodels` | 0.15.0 | SARIMAX (filtro de Kalman) |
-| `scikit-learn` | 1.9.1 | Utilidades de partición |
-| `pyarrow` | 25.0.1 | Leer y escribir Parquet |
-| `matplotlib` | 3.11.2 | Gráficas |
-| `fastapi` | 0.143.0 | El orquestador |
-| `uvicorn` | 0.54.0 | Servidor que corre la API |
-| `httpx` | 0.28.1 | Cliente HTTP hacia Ollama |
-| `pydantic` | 2.14.1 | Validación de los cuerpos de petición |
-
-### 7. Comprobar que quedó bien
+**Comprobar la GPU:**
 
 ```powershell
 python check_gpu.py
 ```
 
-Debe reportar `CUDA disponible: True` y el nombre de la GPU, o terminar en
-`CUDA NO disponible` si instalaste la build de CPU, que también es un resultado
-válido.
-
----
-
-## Pasos de prueba para el entrenamiento
-
-### Paso 1 — Activar el entorno virtual
-
-```powershell
-cd <la carpeta donde está el repositorio>
-.\.venv\Scripts\Activate.ps1
-```
-
-Con Git Bash: `source .venv/Scripts/activate`. Si prefieres no activar nada,
-cada `python` de aquí en adelante se sustituye por `.venv\Scripts\python.exe`.
-
-### Paso 2 — Verificar la GPU
-
-```powershell
-python check_gpu.py
-```
-
-El script no solo pregunta si hay GPU: multiplica dos matrices de 5000×5000 para
-confirmar que **realmente ejecuta**, porque `is_available()` puede dar `True` y
-aun así fallar al lanzar kernels.
-
-### Paso 3 — Entrar a `src/`
+**Entrenar el modelo.** Este paso es obligatorio en un clon nuevo: los pesos no
+se versionan, así que `models/` llega vacío y sin modelo no hay predicción ni
+API.
 
 ```powershell
 cd src
+python -m gru.entrenar --dias 60 --implementacion pytorch
 ```
 
-Todo lo demás corre desde aquí, con `python -m`, porque las carpetas son
-paquetes de Python.
+Deja tres archivos en `models/`: `gru.pt`, `gru_normalizador.json` y
+`gru_metadatos.json`. Los tres son necesarios: sin el normalizador las salidas
+no se pueden convertir a ppm ni a grados.
 
-### Paso 4 — Generar los datos sintéticos
+### 3. Componente LLM (Llama 3.1 vía Ollama)
+
+Ollama es un programa aparte, no un paquete de pip. Instálalo desde
+[ollama.com/download/windows](https://ollama.com/download/windows); queda
+corriendo como servicio en segundo plano.
 
 ```powershell
-python -m comun.sintetico --dias 20 --espacios 2
+ollama --version
+ollama pull llama3.1:8b          # ~5 GB, una sola vez
 ```
 
-Imprime un resumen por espacio y escribe `data/raw/sintetico.parquet`. Los
-pasos siguientes generan sus propios datos con la misma semilla, así que este
-paso sirve para inspeccionarlos; no es un requisito de los demás.
+Comprueba que responde, desde `src/`:
 
-### Paso 5 — Verificar que la red aprende
+```powershell
+python -m llm.cliente_llm
+```
+
+Debe terminar en `OK: Ollama respondió` seguido de una frase en español. Si
+Ollama no está corriendo, el mismo comando dice qué falta y termina sin
+tronar. Para arrancarlo a mano: `ollama serve`.
+
+El modelo corre local: ninguna lectura sale de la máquina.
+
+---
+
+## Cómo probar que predice
+
+Todo desde `src/`, con el entorno activado y el modelo ya entrenado.
+
+### 1. Que la red aprende
 
 ```powershell
 python -m gru.entrenar --prueba-sintetica --implementacion pytorch
 ```
 
-Debe terminar con `OK: la red aprende la estructura de una serie conocida.`
-Confirma que la red aprende una serie limpia cuya respuesta se conoce: si falla,
-el problema está en el código y no en los datos.
+Entrena con una serie limpia cuya respuesta se conoce. Debe terminar con
+`OK: la red aprende la estructura de una serie conocida.` Si falla, el problema
+está en el código, no en los datos.
 
-**Usa siempre `--implementacion pytorch` en vivo.** Sin esa bandera corre la
-celda escrita a mano, que tarda unos 2.5 minutos.
+### 2. Qué tan bien predice
 
-### Paso 6 — El baseline SARIMAX
+El entrenamiento completo ya lo mide: al terminar imprime el MAE, RMSE y R² por
+variable sobre el conjunto de prueba —ventanas que la red nunca vio— y el MAE
+por horizonte, de +5 a +30 min. Esos números también quedan en
+`models/gru_metadatos.json`.
 
-```powershell
-python -m sarimax.entrenar --dias 20 --espacios 2
-```
-
-Ajusta un modelo univariado por variable y espacio, así que 5 variables en 2
-espacios son 10 ajustes independientes.
-
-### Paso 7 — La comparación
+### 3. Una predicción concreta
 
 ```powershell
-python comparar_modelos.py --dias 20 --espacios 2
+python -m gru.predecir --espacio 1 --horizonte 30      # directa, 30 min
+python -m gru.predecir --espacio 3 --horizonte 120     # iterativa, 2 h
 ```
 
-Entrena los dos modelos y los compara sobre las mismas ventanas de prueba. Es
-el resultado principal del prototipo.
+Imprime la lectura actual y la predicción paso a paso. Esto muestra que el
+modelo **corre**, no que acierta: para eso está el paso 2.
 
-Los dos se entrenan por separado y con criterios distintos: el GRU minimiza MSE
-por backpropagation, SARIMAX maximiza verosimilitud por filtro de Kalman.
-Ninguno alimenta al otro. Lo que comparten es el conjunto de prueba, las
-particiones, las ventanas y el código de métricas, y eso es lo que hace
-comparables los números. `verificar_contra_gru()` reconstruye los objetivos del
-GRU y aborta si difieren, así que esa igualdad no se asume.
+### 4. A través de la API, sin LLM
+
+```powershell
+uvicorn api.api:app --port 8000
+```
+
+Abre [localhost:8000/docs](http://localhost:8000/docs) y prueba `POST /contexto`
+con:
+
+```json
+{"pregunta": "¿Cómo va a estar el CO2 del 3302 en una hora?", "espacio_id": 1}
+```
+
+Devuelve la intención detectada, la predicción del GRU y el prompt que se le
+mandaría a Llama. No necesita Ollama.
 
 ---
 
-## Otros comandos
+## Pasos de prueba para el entrenamiento
 
-### Entrenamiento completo (~30 min en RTX 4090)
-
-```powershell
-python -m gru.entrenar --dias 60
-```
-
-Con `--implementacion pytorch` baja a unos 2 minutos, útil mientras iteras. La
-celda escrita a mano es ~14× más lenta porque un bucle de Python sobre los pasos
-de tiempo no puede usar el kernel fusionado de cuDNN.
-
-Deja en `models/` tres archivos: los pesos (`gru.pt`), los parámetros de
-normalización (`gru_normalizador.json`) y las métricas de la corrida
-(`gru_metadatos.json`). **Los tres son necesarios**: sin el normalizador, las
-salidas del modelo no se pueden convertir a ppm ni a grados.
-
-### Comparar las dos implementaciones recurrentes
-
-Entrena la celda escrita a mano y la de PyTorch con la misma semilla y los
-mismos datos, y verifica que lleguen a métricas equivalentes.
+Desde `src/`.
 
 ```powershell
-python -m gru.comparar_implementaciones
+python -m comun.sintetico --dias 20 --espacios 2                     # generar e inspeccionar datos
+python -m gru.entrenar --prueba-sintetica --implementacion pytorch   # la red aprende
+python -m sarimax.entrenar --dias 20 --espacios 2                    # baseline
+python comparar_modelos.py --dias 20 --espacios 2                    # GRU contra SARIMAX
 ```
 
-### Con datos reales, cuando existan
+La comparación entrena los dos modelos y los evalúa sobre las mismas ventanas
+de prueba. Se entrenan con criterios distintos —el GRU minimiza MSE, SARIMAX
+maximiza verosimilitud— y ninguno alimenta al otro; lo que comparten son las
+particiones, las ventanas y el código de métricas.
+`verificar_contra_gru()` aborta si las ventanas no coinciden.
 
-```powershell
-python -m gru.entrenar --datos ../data/raw/aulas3.parquet
-```
-
-### Opciones útiles
-
-| Opción | Para qué |
-|---|---|
-| `--dias N` | Días de datos sintéticos a generar |
-| `--espacios N` | Espacios a simular (no aplica a `gru.entrenar`) |
-| `--epocas N` | Tope de épocas (por omisión 200, pero el early stopping suele cortar antes) |
-| `--paciencia N` | Épocas sin mejora antes de detener |
-| `--normalizar-por-espacio` | Media y sigma por espacio en vez de globales |
-| `--etiqueta nombre` | Prefijo de los archivos guardados, para comparar corridas |
-| `--implementacion pytorch` | Usa `nn.GRU` en vez de la celda escrita a mano: ~14× más rápido |
-| `--estacionalidad estacional` | SARIMAX con `s=288` en vez de Fourier. Inviable: 2,147 s por modelo |
-
-### Si algo falla
-
-| Síntoma | Qué hacer |
-|---|---|
-| `python` no se reconoce | No marcaste `Add python.exe to PATH`, o no reabriste la terminal. Prueba `py --version` |
-| `ModuleNotFoundError` | Estás fuera de `src/`. Los comandos van con `python -m` desde ahí |
-| El prompt no dice `(.venv)` | No activaste el entorno. Vuelve al paso 1 |
-| `running scripts is disabled` | PowerShell bloquea scripts. Ve a **Instalación desde cero**, paso 5 |
-| `cd` no cambia de disco | Estás en `cmd`, no en PowerShell. Usa `cd /d D:\ruta` o abre PowerShell |
-| `No matching distribution found for torch` | Tu versión de Python queda fuera del rango 3.10–3.14. Instala 3.12 y crea el entorno con `py -3.12` |
-| `CUDA NO disponible` | Normal si instalaste la build de CPU. Si esperabas GPU, revisa que el índice `cuXXX` corresponda a tu driver |
-| Tarda demasiado | Te faltó `--implementacion pytorch` |
-| SARIMAX no termina | Usaste `--estacionalidad estacional`. Quítalo |
+**Usa `--implementacion pytorch`** salvo que quieras la celda escrita a mano,
+que es ~14× más lenta.
 
 ---
 
-## Capa conversacional (GRU + Llama 3.1)
-
-Implementa la sección 4.3: patrón RAG, con el GRU y la base de datos
-produciendo los números y Llama 3.1 8B solo redactando la frase. Detalles de
-diseño en [src/llm/README.md](src/llm/README.md).
-
-### Predecir desde la línea de comandos
-
-No necesita la API ni Ollama. Carga el checkpoint de `models/` y predice un
-espacio:
-
-```powershell
-python -m gru.predecir --espacio 1 --horizonte 30     # directo, una pasada
-python -m gru.predecir --espacio 3 --horizonte 120    # iterativo, 4 pasadas
-```
-
-### Ver el ruteo de preguntas
-
-```powershell
-python -m llm.clasificador      # tabla de intención por pregunta de ejemplo
-python -m llm.contexto          # los prompts que se arman para cada tipo
-```
-
-### Instalar Ollama y el modelo
-
-```powershell
-# Descargar de https://ollama.com/download/windows, luego:
-ollama --version
-ollama pull llama3.1:8b         # ~5 GB
-python -m llm.cliente_llm       # sondea y pregunta algo con datos conocidos
-```
-
-### Correr la API
+## La API
 
 ```powershell
 uvicorn api.api:app --port 8000
@@ -389,57 +212,64 @@ uvicorn api.api:app --port 8000
 | Endpoint | Para qué |
 |---|---|
 | `GET /health` | Estado del GRU, de los datos y de Ollama |
-| `POST /chat` | Pregunta en lenguaje natural, respuesta redactada |
-| `POST /contexto` | La cadena completa **sin** llamar al LLM: devuelve el prompt |
-| `GET /docs` | Interfaz interactiva que genera FastAPI |
+| `POST /chat` | Pregunta en lenguaje natural, respuesta redactada por Llama |
+| `POST /contexto` | Lo mismo **sin** llamar a Llama: devuelve el prompt |
+| `GET /docs` | Interfaz para probar los endpoints desde el navegador |
 
-`/contexto` es el que sirve para la demo sin Ollama instalado, y para separar
-la culpa cuando una respuesta sale mal: si el prompt ya traía el dato
-equivocado, el problema está en la recuperación y no en el modelo.
-
-```powershell
-curl http://localhost:8000/health
-```
-
-### Lo que todavía no está conectado
+Qué está conectado y qué no:
 
 | Pieza | Estado |
 |---|---|
 | GRU, predicción directa e iterativa | real, desde `models/gru.pt` |
-| Clasificación y construcción de prompts | real |
-| Fuente de datos | **sintética**, en memoria. `TODO E5` en `api/api.py` |
-| Detector de anomalías 3σ | **no existe**; la API lo dice en vez de responder que no hay nada |
+| Clasificación de la pregunta y prompts | real |
+| Fuente de datos | **sintética**, en memoria (`TODO E5` en `api/api.py`) |
+| Detector de anomalías | **no existe**; la API lo dice en vez de responder que no hay nada |
+
+Diseño de esta capa en [src/llm/README.md](src/llm/README.md).
 
 ---
 
-## Dónde se muestran los resultados
+## Otros comandos
 
-### En pantalla
+```powershell
+python -m gru.comparar_implementaciones                  # celda a mano contra nn.GRU
+python -m gru.entrenar --datos ../data/raw/aulas3.parquet  # con datos reales
+python -m llm.clasificador                               # cómo se rutean las preguntas
+python -m llm.contexto                                   # los prompts por tipo
+```
 
-| Qué | Dónde se imprime |
+| Opción | Para qué |
 |---|---|
-| Tabla de métricas por variable | `metricas.imprimir()` |
-| MAE por horizonte | `entrenar.main()` |
-| GRU contra SARIMAX | `comparar_modelos.imprimir_comparacion()` |
+| `--dias N` | Días de datos sintéticos |
+| `--espacios N` | Espacios a simular (no aplica a `gru.entrenar`, que usa 5) |
+| `--epocas N` / `--paciencia N` | Tope de épocas y épocas sin mejora antes de parar |
+| `--implementacion pytorch` | `nn.GRU` en vez de la celda a mano |
+| `--normalizar-por-espacio` | Media y sigma por espacio en vez de globales |
+| `--etiqueta nombre` | Prefijo de los archivos guardados |
+| `--estacionalidad estacional` | SARIMAX con `s=288`. Inviable: 2,147 s por modelo |
 
-### En archivos
+---
 
-| Archivo | Qué guarda |
+## Si algo falla
+
+| Síntoma | Qué hacer |
 |---|---|
-| `models/gru.pt` | Los pesos entrenados |
-| `models/gru_normalizador.json` | Media y sigma por variable |
-| `models/gru_metadatos.json` | Métricas, mejor época, hiperparámetros |
-| `models/sarimax_metadatos.json` | Métricas y AIC de los modelos ajustados |
-| `data/processed/comparacion_gru_sarimax.json` | La comparación completa |
-
-Ninguno de esos archivos se versiona.
+| `python` no se reconoce | No marcaste `Add python.exe to PATH`, o no reabriste la terminal |
+| `running scripts is disabled` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| `ModuleNotFoundError` | Estás fuera de `src/`, o el prompt no dice `(.venv)` |
+| `No matching distribution found for torch` | Python fuera del rango 3.10–3.14 |
+| `CUDA NO disponible` | Normal con la build de CPU; si esperabas GPU, revisa el índice `cuXXX` |
+| `models/gru.pt does not exist` | Clon nuevo: entrena primero (Instalación, paso 2) |
+| `gru_cargado: false` en `/health` | Lo mismo: falta entrenar |
+| `No se puede conectar con Ollama` | Ollama no está instalado o no corre: `ollama serve` |
+| `Ollama no tiene el modelo` | `ollama pull llama3.1:8b` |
+| Tarda demasiado | Te faltó `--implementacion pytorch` |
 
 ---
 
 ## El contrato de datos
 
-El pipeline no sabe de dónde salen los datos. Cualquier fuente debe entregar un
-DataFrame con estas columnas:
+Cualquier fuente de datos debe entregar un DataFrame con estas columnas:
 
 | Columna | Tipo | Nota |
 |---|---|---|
@@ -460,40 +290,34 @@ cuando un nodo pierde la red.
 
 ```
 src/comun/        contrato de datos, ventanas, normalización, métricas
-src/gru/          modelo predictivo y predicción (ver src/gru/README.md)
+src/gru/          modelo, entrenamiento y predicción
 src/sarimax/      baseline estadístico
-src/llm/          clasificador, prompts y cliente de Ollama (ver src/llm/README.md)
+src/llm/          clasificador, prompts y cliente de Ollama
 src/api/          orquestador FastAPI
-src/comparar_modelos.py   GRU contra SARIMAX sobre las mismas ventanas
-docs/             estándar de código, hallazgos de ROBOD
-data/raw/         datos de entrada (no versionados)
-data/processed/   datos derivados (no versionados)
-models/           pesos y metadatos (no versionados)
+src/comparar_modelos.py   GRU contra SARIMAX
+docs/             estándares y hallazgos de ROBOD
+data/, models/    datos y pesos (no versionados)
 requirements.txt  dependencias, menos torch
 check_gpu.py      diagnóstico de CUDA
 ```
-
-Pendiente: `src/anomalias/` (detector 3σ), que es lo único que le falta a la
-API para estar completa.
-
----
 
 ## Documentación
 
 | Documento | Contenido |
 |---|---|
-| [src/gru/README.md](src/gru/README.md) | Decisiones de diseño del modelo y qué queda abierto |
-| [src/llm/README.md](src/llm/README.md) | Reparto de trabajo con el LLM, por qué el clasificador no lo usa, y qué no está conectado |
-| [src/sarimax/README.md](src/sarimax/README.md) | Qué es y qué no es el baseline, y por qué no `s=288` |
+| [src/gru/README.md](src/gru/README.md) | Decisiones de diseño del GRU y qué queda abierto |
+| [src/llm/README.md](src/llm/README.md) | La capa conversacional: reparto de trabajo con el LLM |
+| [src/sarimax/README.md](src/sarimax/README.md) | El baseline, y por qué no `s=288` |
 | [docs/estandar_codigo.md](docs/estandar_codigo.md) | Convención de documentación del código |
-| [docs/hallazgos_robod.md](docs/hallazgos_robod.md) | Evaluación descartada de ROBOD y qué defectos reaparecerán con los sensores propios |
+| [docs/estandar_commits.md](docs/estandar_commits.md) | Convención de mensajes de commit |
+| [docs/hallazgos_robod.md](docs/hallazgos_robod.md) | Evaluación descartada de ROBOD |
 
 ---
 
 ## Advertencia sobre los resultados
 
-Las métricas que produce el pipeline hoy se calculan sobre datos sintéticos.
-Miden qué tan bien el GRU aprende un generador escrito para este repositorio,
-así que son **circulares por construcción** y no constituyen un resultado de
-desempeño. Sirven para verificar que el pipeline corre y que la red aprende
-estructura temporal. El desempeño real se mide con los datos de Aulas 3.
+Las métricas de hoy se calculan sobre datos sintéticos: miden qué tan bien el
+GRU aprende un generador escrito para este repositorio, así que son
+**circulares por construcción** y no son un resultado de desempeño. Sirven para
+verificar que el pipeline corre y que la red aprende estructura temporal. El
+desempeño real se mide con los datos de Aulas 3.
