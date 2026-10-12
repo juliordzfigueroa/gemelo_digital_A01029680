@@ -89,6 +89,12 @@ pip install -r requirements.txt
 [pytorch.org](https://pytorch.org/get-started/locally/) da el índice. **Sin GPU
 NVIDIA**, usa `pip install torch` a secas: todo corre igual en CPU, más lento.
 
+`requirements.txt` ya incluye lo que usa el módulo de clima (`httpx`), así que
+no hay que instalar nada más para él. Lo único que necesita es **acceso a
+internet** para consultar [Open-Meteo](https://open-meteo.com/), que es
+gratuito y no pide registro ni clave. Si la red del campus bloquea el acceso,
+el resto del sistema funciona igual; solo faltarán los datos de clima.
+
 **Comprobar la GPU:**
 
 ```powershell
