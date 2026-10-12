@@ -134,94 +134,112 @@ El modelo corre local: ninguna lectura sale de la máquina.
 
 ---
 
-## Cómo probar que predice
+## Prueba local completa
 
-Todo desde `src/`, con el entorno activado y el modelo ya entrenado.
+Todo en orden, desde `src/` con el entorno activado. Necesita la exportación
+de los sensores y el horario en `data/raw/`.
 
-### 1. Que la red aprende
+```powershell
+cd src
+```
+
+### 1. Limpiar los datos
+
+```powershell
+python -m ingesta.limpieza "../data/raw/1 oct a 11 octubre 2026.csv"
+```
+
+Acepta varios archivos a la vez. Escribe `data/processed/aulas3.parquet` y
+`aulas3_reporte.json`, con cada valor descartado y por qué. Al final imprime
+una tabla por espacio; hoy hay cuatro útiles: 206, 208, 305 y 308.
+
+### 2. Que la red aprende
 
 ```powershell
 python -m gru.entrenar --prueba-sintetica --implementacion pytorch
 ```
 
 Entrena con una serie determinista, sin ruido ni huecos, cuya respuesta se
-conoce. Debe terminar con
-`OK: la red aprende la estructura de una serie conocida.` Si falla, el problema
-está en el código, no en los datos.
+conoce. Debe terminar en `OK: la red aprende la estructura de una serie
+conocida.` Si falla, el problema está en el código, no en los datos.
 
-### 2. Qué tan bien predice
-
-El entrenamiento completo ya lo mide: al terminar imprime el MAE, RMSE y R² por
-variable sobre el conjunto de prueba —ventanas que la red nunca vio— y el MAE
-por horizonte, de +5 a +30 min. Esos números también quedan en
-`models/gru_metadatos.json`.
-
-### 3. Una predicción concreta
+### 3. Entrenar y medir
 
 ```powershell
-python -m gru.predecir --espacio 1 --horizonte 30      # directa, 30 min
-python -m gru.predecir --espacio 3 --horizonte 120     # iterativa, 2 h
+python -m gru.entrenar --implementacion pytorch
 ```
 
-Imprime la lectura actual y la predicción paso a paso. Esto muestra que el
-modelo **corre**, no que acierta: para eso está el paso 2.
+Imprime MAE, RMSE y R² por variable sobre el día de prueba —un día entre
+semana que la red nunca vio— y el MAE por horizonte, de +5 a +30 min. Deja el
+modelo en `models/`.
 
-### 4. A través de la API, sin LLM
+### 4. Una predicción concreta
+
+```powershell
+python -m gru.predecir --espacio 308 --horizonte 30     # directa, 30 min
+python -m gru.predecir --espacio 206 --horizonte 120    # iterativa, 2 h
+```
+
+Toma la última hora de lecturas consecutivas del archivo y predice. "Ahora"
+es la última lectura del archivo, no la hora actual. Esto muestra que el
+modelo **corre**; qué tan bien acierta lo dice el paso 3.
+
+### 5. Contra el baseline
+
+```powershell
+python comparar_modelos.py
+```
+
+Entrena el GRU y ajusta SARIMAX sobre las mismas ventanas de prueba, y aborta
+si no coinciden. Con una semana de datos SARIMAX gana; ver la advertencia al
+final.
+
+### 6. El horario contra los sensores
+
+```powershell
+python -m ingesta.horarios ../data/raw/horarios.csv
+```
+
+Compara movimiento y eCO₂ dentro y fuera de los bloques de clase, por salón y
+día.
+
+### 7. La API
 
 ```powershell
 uvicorn api.api:app --port 8000
 ```
 
-Abre [localhost:8000/docs](http://localhost:8000/docs) y prueba `POST /contexto`
-con:
+Abre [localhost:8000/docs](http://localhost:8000/docs) en el navegador y prueba
+desde ahí:
+
+- `POST /contexto` muestra la intención detectada, los datos y el prompt que
+  recibiría Llama. **No necesita Ollama.**
+- `POST /chat` devuelve la respuesta redactada por Llama. Necesita Ollama
+  corriendo.
+
+Con un cuerpo como:
 
 ```json
-{"pregunta": "¿Cómo va a estar el CO2 del 3302 en una hora?", "espacio_id": 1}
+{"pregunta": "¿Cómo va a estar el CO2 del 3308 en una hora?"}
 ```
 
-Devuelve la intención detectada, la predicción del GRU y el prompt que se le
-mandaría a Llama. No necesita Ollama.
-
----
-
-## Pasos de prueba para el entrenamiento
-
-Desde `src/`.
+Los salones con datos son 3206, 3208, 3305 y 3308. Para comprobar desde la
+terminal que la API está arriba:
 
 ```powershell
-python -m gru.entrenar --prueba-sintetica --implementacion pytorch   # la red aprende
-python -m sarimax.entrenar                                           # baseline
-python comparar_modelos.py                                           # GRU contra SARIMAX
+Invoke-RestMethod http://localhost:8000/health
 ```
 
-La comparación entrena los dos modelos y los evalúa sobre las mismas ventanas
-de prueba. Se entrenan con criterios distintos —el GRU minimiza MSE, SARIMAX
-maximiza verosimilitud— y ninguno alimenta al otro; lo que comparten son las
-particiones, las ventanas y el código de métricas.
-`verificar_contra_gru()` aborta si las ventanas no coinciden.
-
-**Usa `--implementacion pytorch`** salvo que quieras la celda escrita a mano,
-que es ~14× más lenta.
+Para preguntas, usa `/docs`: en PowerShell 5.1, `curl` es otro comando y los
+acentos de la pregunta se corrompen al mandarlos desde la terminal.
 
 ---
 
 ## Datos reales
 
-Las exportaciones de los sensores van a `data/raw/` (no se versionan). Desde
-`src/`:
-
-```powershell
-python -m ingesta.limpieza "../data/raw/1 oct a 11 octubre 2026.csv"   # acepta varios archivos
-python -m ingesta.horarios "../data/raw/horarios.csv"                  # horario contra sensores
-python -m gru.entrenar --datos ../data/processed/aulas3.parquet        # entrenar con datos reales
-```
-
-La limpieza escribe `data/processed/aulas3.parquet` en el formato del contrato
-de datos y un `aulas3_reporte.json` con cada lectura descartada y por qué. Qué
-dispositivo mide qué espacio está en [config/sensores.csv](config/sensores.csv),
+Qué dispositivo mide qué espacio está en [config/sensores.csv](config/sensores.csv),
 y los espacios del edificio en [config/espacios.json](config/espacios.json).
-
-Diferencias con el contrato que hay que tener presentes:
+Diferencias con el contrato de datos que hay que tener presentes:
 
 | Variable | En los sensores reales |
 |---|---|
@@ -250,7 +268,7 @@ Qué está conectado y qué no:
 |---|---|
 | GRU, predicción directa e iterativa | real, desde `models/gru.pt` |
 | Clasificación de la pregunta y prompts | real |
-| Fuente de datos | **sintética**, en memoria (`TODO E5` en `api/api.py`) |
+| Fuente de datos | archivo limpio `aulas3.parquet`; la base de datos del Tec queda pendiente (`TODO E5` en `api/api.py`) |
 | Detector de anomalías | **no existe**; la API lo dice en vez de responder que no hay nada |
 
 Diseño de esta capa en [src/llm/README.md](src/llm/README.md).
