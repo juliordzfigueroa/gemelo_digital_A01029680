@@ -285,9 +285,6 @@ particiones, las ventanas y el código de métricas, y eso es lo que hace
 comparables los números. `verificar_contra_gru()` reconstruye los objetivos del
 GRU y aborta si difieren, así que esa igualdad no se asume.
 
-Los tiempos de arriba se midieron en una RTX 4090. En CPU o en otra GPU cambian,
-pero el orden de magnitud se sostiene.
-
 ---
 
 ## Otros comandos
