@@ -1,0 +1,9 @@
+sensor_id,dispositivo,espacio_id,desde,hasta,nota
+1,esp32_room_01,401,,,oficina abierta piso 4; no aparece en los datos de 1-11 oct
+2,esp32_room_02,402,,,oficina abierta piso 4; solo 2 h de datos el 2 oct
+3,esp32_room_03,308,,,salon 3308
+4,esp32_room_04,305,,,salon 3305
+5,esp32_room_05,304,,,salon 3304; sensor de gas muerto (eco2 = -1 en 96%)
+6,esp32_room_06,208,,,salon 3208
+7,esp32_room_07,206,,,salon 3206
+8,esp32_room_08,,,,sin lugar asignado; solo sirve para conocer el formato

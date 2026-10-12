@@ -1,0 +1,268 @@
+{
+  "_descripcion": "Fuente única de espacios: la leen la limpieza, el clasificador, la API y el visor. espacio_id = piso*100 + numero. Un espacio existe aunque no tenga sensor; qué sensor mide qué espacio vive en sensores.csv.",
+  "_pendiente": "coordenadas en la nube de puntos (falta escaneo interior); tipos de pisos 0 y 1; el horario menciona S01_LAB, que no se incluyó porque no sigue la numeración.",
+  "espacios": [
+    {
+      "espacio_id": 3,
+      "nombre": "space_0_3",
+      "piso": 0,
+      "tipo": "desconocido",
+      "salon": "3003",
+      "alias": [
+        "3003"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 6,
+      "nombre": "space_0_6",
+      "piso": 0,
+      "tipo": "desconocido",
+      "salon": "3006",
+      "alias": [
+        "3006"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 7,
+      "nombre": "space_0_7",
+      "piso": 0,
+      "tipo": "desconocido",
+      "salon": "3007",
+      "alias": [
+        "3007"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 107,
+      "nombre": "space_1_7",
+      "piso": 1,
+      "tipo": "desconocido",
+      "salon": "3107",
+      "alias": [
+        "3107"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 110,
+      "nombre": "space_1_10",
+      "piso": 1,
+      "tipo": "desconocido",
+      "salon": "3110",
+      "alias": [
+        "3110"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 111,
+      "nombre": "space_1_11",
+      "piso": 1,
+      "tipo": "desconocido",
+      "salon": "3111",
+      "alias": [
+        "3111"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 201,
+      "nombre": "space_2_1",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3201",
+      "alias": [
+        "3201"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 202,
+      "nombre": "space_2_2",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3202",
+      "alias": [
+        "3202"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 203,
+      "nombre": "space_2_3",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3203",
+      "alias": [
+        "3203"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 204,
+      "nombre": "space_2_4",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3204",
+      "alias": [
+        "3204"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 205,
+      "nombre": "space_2_5",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3205",
+      "alias": [
+        "3205"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 206,
+      "nombre": "space_2_6",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3206",
+      "alias": [
+        "3206"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 207,
+      "nombre": "space_2_7",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3207",
+      "alias": [
+        "3207"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 208,
+      "nombre": "space_2_8",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3208",
+      "alias": [
+        "3208"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 209,
+      "nombre": "space_2_9",
+      "piso": 2,
+      "tipo": "salon",
+      "salon": "3209",
+      "alias": [
+        "3209"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 301,
+      "nombre": "space_3_1",
+      "piso": 3,
+      "tipo": "salon",
+      "salon": "3301",
+      "alias": [
+        "3301"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 303,
+      "nombre": "space_3_3",
+      "piso": 3,
+      "tipo": "salon",
+      "salon": "3303",
+      "alias": [
+        "3303"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 304,
+      "nombre": "space_3_4",
+      "piso": 3,
+      "tipo": "salon",
+      "salon": "3304",
+      "alias": [
+        "3304"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 305,
+      "nombre": "space_3_5",
+      "piso": 3,
+      "tipo": "salon",
+      "salon": "3305",
+      "alias": [
+        "3305"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 306,
+      "nombre": "space_3_6",
+      "piso": 3,
+      "tipo": "salon",
+      "salon": "3306",
+      "alias": [
+        "3306"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 308,
+      "nombre": "space_3_8",
+      "piso": 3,
+      "tipo": "salon",
+      "salon": "3308",
+      "alias": [
+        "3308"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 309,
+      "nombre": "space_3_9",
+      "piso": 3,
+      "tipo": "salon",
+      "salon": "3309",
+      "alias": [
+        "3309"
+      ],
+      "coordenadas": null
+    },
+    {
+      "espacio_id": 401,
+      "nombre": "space_4_1",
+      "piso": 4,
+      "tipo": "oficina_abierta",
+      "salon": null,
+      "alias": [],
+      "coordenadas": null,
+      "nota": "Zona física sin describir: anotar cuál es"
+    },
+    {
+      "espacio_id": 402,
+      "nombre": "space_4_2",
+      "piso": 4,
+      "tipo": "oficina_abierta",
+      "salon": null,
+      "alias": [],
+      "coordenadas": null,
+      "nota": "Zona física sin describir: anotar cuál es"
+    }
+  ]
+}
