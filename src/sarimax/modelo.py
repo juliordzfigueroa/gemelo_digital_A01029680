@@ -168,6 +168,11 @@ class BaselineSARIMAX:
         # statsmodels warns loudly about non-invertible starting parameters and
         # about convergence on series this long. Neither is actionable here and
         # both would bury the output across 25 fits.
+        #
+        # Stationarity is enforced because d=0 assumes it. On the real sensor
+        # data, temperature and humidity are persistent enough at 5 minutes
+        # that the unconstrained fit landed on AR roots of 1.000 and 1.057, an
+        # explosive process whose 30-minute forecasts reached 1e76.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             modelo = SARIMAX(
@@ -175,7 +180,7 @@ class BaselineSARIMAX:
                 exog=self._exogenas(len(serie)),
                 order=self.orden,
                 seasonal_order=estacional,
-                enforce_stationarity=False,
+                enforce_stationarity=True,
                 enforce_invertibility=False,
             )
             self.resultado = modelo.fit(disp=False, maxiter=200)
