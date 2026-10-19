@@ -1,7 +1,10 @@
 # Estándar de código
 
 Convención para todos los archivos `.py` del proyecto. Comentarios, docstrings e
-identificadores en **inglés**.
+identificadores en **inglés**: variables, funciones, clases, módulos, columnas
+de datos, opciones de línea de comandos y campos de la API. Lo que lee una
+persona se queda en **español**: mensajes en pantalla, prompts y respuestas del
+asistente, y la documentación.
 
 ## Encabezado de archivo
 

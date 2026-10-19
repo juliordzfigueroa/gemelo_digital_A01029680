@@ -22,8 +22,8 @@ inglés, que dice qué cambia.
 | Máximo 60 caracteres | `Add GRU iterative prediction` | una oración que explica todo |
 | Un solo cambio lógico | `Add LLM client` | `Add LLM client and fix README typo` |
 
-Los nombres de archivos, funciones y variables se escriben tal cual, aunque
-estén en español: `Fix truncated header in sarimax/model.py`.
+Los nombres de archivos, funciones y variables se escriben tal cual aparecen en
+el código: `Fix truncated header in sarimax/model.py`.
 
 ## Verbos
 
