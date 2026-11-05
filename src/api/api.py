@@ -23,7 +23,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Read the cleaned sensor data instead of synthetic data.
+    2026-11-05 - Answer questions about a whole floor.
 
 Reference:
     Sections 4.3.1 to 4.3.4 of the research document.
@@ -31,11 +31,14 @@ Reference:
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from common import config as cfg
@@ -61,14 +64,14 @@ STATE: dict[str, Any] = {
 # Request and response shapes
 # --------------------------------------------------------------------------
 class Question(BaseModel):
-    """Body of a /chat or /contexto request."""
+    """Body of a /chat or /context request."""
 
     question: str = Field(min_length=1, max_length=500)
     space_id: int | None = Field(
         default=None,
         description=(
-            "Space selected in the viewer. Used when the question names none. "
-            "A space named in the text wins over this value."
+            "Space selected in the viewer. Used when the question names "
+            "neither a space nor a floor; either one in the text wins."
         ),
     )
 
@@ -79,6 +82,7 @@ class Answer(BaseModel):
     response: str
     intent_type: str
     space: int | None
+    floor: int | None = None
     horizon_min: int | None
     forecast_method: str | None
     warning: str | None
@@ -137,6 +141,11 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan_handler,
 )
+
+# The viewer page lives with the API so /chat and /spaces are same-origin
+# requests; only the clouds come from the scan server, which allows this origin.
+if cfg.VIEWER_DIR.is_dir():
+    app.mount("/viewer", StaticFiles(directory=cfg.VIEWER_DIR, html=True), name="viewer")
 
 
 # --------------------------------------------------------------------------
@@ -332,6 +341,155 @@ def _number(value: object) -> float | None:
 
 
 # --------------------------------------------------------------------------
+# Floor questions
+# --------------------------------------------------------------------------
+def _space_labels() -> dict[int, str]:
+    """Return the name a person uses for each space.
+
+    The room number when there is one ("3308"), the registry name otherwise.
+    The prompt gets these instead of ids so the answer never says "espacio 5".
+
+    Returns:
+        A dict from space id to its label.
+    """
+    registry = json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
+    return {
+        int(s["space_id"]): s.get("room") or s["name"] for s in registry["spaces"]
+    }
+
+
+def _floor_summary(rooms: list[dict], key: str, variables: list[str]) -> dict:
+    """Mean, minimum and maximum of each variable across the rooms of a floor.
+
+    Computed here and not by the LLM, like every other number in the answer.
+
+    Args:
+        rooms: One entry per room, each holding a dict of values under `key`.
+        key: Which dict of each room to summarize.
+        variables: Variables to summarize.
+
+    Returns:
+        Per variable: mean, min and max, each extreme with the room it is in,
+        and how many rooms had a value.
+    """
+    summary = {}
+    for variable in variables:
+        pairs = [
+            (room[key][variable], room["room"])
+            for room in rooms
+            if room.get(key, {}).get(variable) is not None
+        ]
+        if not pairs:
+            continue
+        values = [v for v, _ in pairs]
+        low, high = min(pairs), max(pairs)
+        summary[variable] = {
+            "mean": round(sum(values) / len(values), 2),
+            "min": low[0], "min_room": low[1],
+            "max": high[0], "max_room": high[1],
+            "n_rooms": len(pairs),
+        }
+    return summary
+
+
+def _floor_data(intent: classifier.Intent, floor: int) -> dict:
+    """Retrieve what a question about a whole floor needs.
+
+    Runs the same per-space retrieval as a single-space question for every
+    space on the floor that has readings, and adds a floor summary. Spaces
+    without a sensor are listed by name so the answer can say the floor is
+    only partly measured.
+
+    TODO E5: inherits the stand-in data source of the per-space functions.
+
+    Args:
+        intent: The classified question; carries the kind, the variables
+            and, for forecasts, the horizon.
+        floor: Floor number.
+
+    Returns:
+        A dict shaped for context._prompt_floor, marked with "floor".
+    """
+    labels = _space_labels()
+    space_ids = sorted(classifier.FLOOR_SPACES.get(floor, []))
+    variables = intent.variables or list(cfg.ACTIVE_VARIABLES)
+    data: dict[str, Any] = {
+        "floor": floor,
+        "kind": intent.kind,
+        "variables": variables,
+        "n_spaces": len(space_ids),
+        "rooms": [],
+        "without_data": [],
+        "errors": [],
+    }
+
+    if intent.kind == "anomaly":
+        data["state"] = "unavailable"
+        data["detail"] = _anomaly_data(space_ids[0] if space_ids else 0)["detail"]
+        return data
+
+    if intent.kind == "history":
+        # Same limit as the single-space path: one variable per question.
+        variables = [intent.variables[0] if intent.variables else "co2"]
+        data["variables"] = variables
+
+    for space_id in space_ids:
+        room = labels.get(space_id, str(space_id))
+        if _space_rows(space_id).empty:
+            data["without_data"].append(room)
+            continue
+
+        if intent.kind == "forecast":
+            item = _forecast_data(intent, space_id)
+            if item.get("error"):
+                data["errors"].append(f"{room}: {item['error']}")
+                continue
+            last = item["predictions"][-1] if item["predictions"] else {}
+            data["rooms"].append({
+                "room": room,
+                "current": {v: item["current_reading"].get(v) for v in variables},
+                "predicted": {v: _number(last.get(v)) for v in variables},
+            })
+            data["timestamp"] = item.get("timestamp")
+            data["horizon_min"] = item.get("horizon_min")
+            data["method"] = item.get("method")
+            data["warning"] = item.get("warning")
+        elif intent.kind == "history":
+            item = _history_data(space_id, variables[0])
+            data["rooms"].append({"room": room, "summary": item["summary"]})
+            data["since"], data["until"] = item.get("since"), item.get("until")
+        else:
+            item = _current_data(space_id)
+            data["rooms"].append({
+                "room": room,
+                "timestamp": item["timestamp"],
+                "readings": {v: item["readings"].get(v) for v in variables},
+            })
+
+    if intent.kind == "forecast":
+        data["summary"] = _floor_summary(data["rooms"], "predicted", variables)
+    elif intent.kind == "history":
+        summaries = data["rooms"]
+        variable = variables[0]
+        maxima = [(r["summary"]["max"], r["room"]) for r in summaries if r["summary"].get("max") is not None]
+        minima = [(r["summary"]["min"], r["room"]) for r in summaries if r["summary"].get("min") is not None]
+        means = [r["summary"]["promedio"] for r in summaries if r["summary"].get("promedio") is not None]
+        data["summary"] = {variable: {
+            "max": max(maxima)[0] if maxima else None,
+            "max_room": max(maxima)[1] if maxima else None,
+            "min": min(minima)[0] if minima else None,
+            "min_room": min(minima)[1] if minima else None,
+            "mean": round(sum(means) / len(means), 2) if means else None,
+            "n_rooms": len(summaries),
+        }}
+    else:
+        data["summary"] = _floor_summary(data["rooms"], "readings", variables)
+        stamps = [r["timestamp"] for r in data["rooms"] if r["timestamp"]]
+        data["timestamp"] = max(stamps) if stamps else None
+    return data
+
+
+# --------------------------------------------------------------------------
 # Orchestration
 # --------------------------------------------------------------------------
 def _retrieve(intent: classifier.Intent, space_id: int) -> dict:
@@ -345,13 +503,18 @@ def _retrieve(intent: classifier.Intent, space_id: int) -> dict:
         The data dict for context.build_prompt().
     """
     if intent.kind == "forecast":
-        return _forecast_data(intent, space_id)
-    if intent.kind == "history":
+        data = _forecast_data(intent, space_id)
+    elif intent.kind == "history":
         variable = intent.variables[0] if intent.variables else "co2"
-        return _history_data(space_id, variable)
-    if intent.kind == "anomaly":
-        return _anomaly_data(space_id)
-    return _current_data(space_id)
+        data = _history_data(space_id, variable)
+    elif intent.kind == "anomaly":
+        data = _anomaly_data(space_id)
+    else:
+        data = _current_data(space_id)
+    # The prompt names the space by its room number: given the id, Llama
+    # answered "espacio 308" and, with the old ids, "espacio 5".
+    data["space"] = _space_labels().get(space_id, space_id)
+    return data
 
 
 def _chosen_space(intent: classifier.Intent, requested: int | None) -> int:
@@ -376,6 +539,40 @@ def _chosen_space(intent: classifier.Intent, requested: int | None) -> int:
     if metadata:
         return min(int(k) for k in metadata["space_index"])
     return int(STATE["data"][cfg.SPACE_COLUMN].min())
+
+
+def _target_and_data(
+    intent: classifier.Intent, requested: int | None
+) -> tuple[int | None, int | None, dict]:
+    """Decide whether the answer is about one space or a floor, and fetch it.
+
+    Order of precedence: a space named in the text, then a floor named in the
+    text, then the space selected in the viewer. The classifier only sets a
+    floor when the text names no space.
+
+    Args:
+        intent: The classified question.
+        requested: Space id sent in the request body, if any.
+
+    Returns:
+        The space id (None for a floor question), the floor (None for a
+        space question) and the data dict for context.build_prompt().
+    """
+    if intent.floor is not None:
+        return None, intent.floor, _floor_data(intent, intent.floor)
+    if intent.space_id is None and requested is None:
+        # Nothing names a target. Answering about a default space would
+        # report on a room the user never asked about, so ask instead.
+        return None, None, {"needs_target": True}
+    space = _chosen_space(intent, requested)
+    return space, None, _retrieve(intent, space)
+
+
+# Sent as-is, without the LLM, when the question names no room or floor.
+ASK_FOR_TARGET = (
+    "¿Sobre qué salón o piso? Por ejemplo: «¿cómo está el CO₂ del 3308?» o "
+    "«¿cómo está el piso 3?»."
+)
 
 
 # --------------------------------------------------------------------------
@@ -404,6 +601,60 @@ def health() -> dict:
     }
 
 
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    """Send a browser opening the bare address to the viewer."""
+    return RedirectResponse("/viewer/")
+
+
+@app.get("/spaces")
+def spaces() -> dict:
+    """List the floors and spaces the viewer draws, with their latest reading.
+
+    The registry is read on every call rather than at startup, so a marker
+    measured in Potree and written to spaces.json shows up on reload without
+    restarting the API.
+
+    Returns:
+        The scan server address, the floor clouds, and every space with its
+        marker, dimensions and latest reading (empty when it has no sensor).
+    """
+    registry = json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
+    output = []
+    for space in registry["spaces"]:
+        current = _current_data(int(space["space_id"]))
+        output.append({
+            "space_id": space["space_id"],
+            "name": space["name"],
+            "room": space.get("room"),
+            "floor": space["floor"],
+            "kind": space["kind"],
+            "marker": space.get("marker"),
+            "dimensions": space.get("dimensions"),
+            "timestamp": current["timestamp"],
+            "readings": current["readings"],
+        })
+    return {
+        "scans_url": cfg.SCANS_URL,
+        "floors": registry["floors"],
+        "spaces": output,
+    }
+
+
+@app.get("/spaces/registry")
+def spaces_registry() -> dict:
+    """Return config/spaces.json as it is on disk.
+
+    The viewer merges the markers and dimensions measured in Potree into this
+    copy and offers it for download, so every other field (alias, notes,
+    descriptions) survives the round trip untouched.
+
+    Returns:
+        The parsed registry file.
+    """
+    return json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
+
+
 @app.post("/context")
 def context_for(question: Question) -> dict:
     """Run the chain up to the prompt, without calling the LLM.
@@ -419,15 +670,18 @@ def context_for(question: Question) -> dict:
         The classified intent, the retrieved data and both prompts.
     """
     intent = classifier.classify(question.question)
-    space = _chosen_space(intent, question.space_id)
-    data = _retrieve(intent, space)
-    system, user = context.build_prompt(intent, data)
+    space, floor, data = _target_and_data(intent, question.space_id)
+    if data.get("needs_target"):
+        system, user = None, None
+    else:
+        system, user = context.build_prompt(intent, data)
 
     return {
         "intent": {
             "kind": intent.kind,
             "variables": intent.variables,
             "space_id": space,
+            "floor": floor,
             "horizon_min": intent.horizon_min,
         },
         "data": data,
@@ -448,8 +702,12 @@ def chat(question: Question) -> Answer:
         the caller can show what the answer was based on.
     """
     intent = classifier.classify(question.question)
-    space = _chosen_space(intent, question.space_id)
-    data = _retrieve(intent, space)
+    space, floor, data = _target_and_data(intent, question.space_id)
+    if data.get("needs_target"):
+        return Answer(
+            response=ASK_FOR_TARGET, intent_type=intent.kind, space=None,
+            floor=None, horizon_min=None, forecast_method=None, warning=None,
+        )
     system, user = context.build_prompt(intent, data)
 
     try:
@@ -464,11 +722,15 @@ def chat(question: Question) -> Answer:
         response=response,
         intent_type=intent.kind,
         space=space,
+        floor=floor,
         horizon_min=(
             data.get("horizon_min") if intent.kind == "forecast" else None
         ),
         forecast_method=(
             data.get("method") if intent.kind == "forecast" else None
         ),
-        warning=data.get("warning") or data.get("error") or data.get("detail"),
+        warning=(
+            data.get("warning") or data.get("error") or data.get("detail")
+            or "; ".join(data.get("errors") or []) or None
+        ),
     )

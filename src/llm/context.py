@@ -17,7 +17,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Initial implementation.
+    2026-11-05 - Added the prompt for questions about a whole floor.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -69,6 +69,16 @@ CO2_LEVELS = (
     (800.0, "MODERADO", "aceptable, conviene vigilar"),
 )
 
+# Changes smaller than this read as "se mantiene": below the resolution that
+# matters for a person, and below the sensors' own noise.
+TREND_TOLERANCE = {
+    "co2": 5.0,
+    "temperature": 0.1,
+    "humidity": 0.5,
+    "light": 1.0,
+    "motion": 0.05,
+}
+
 UNIT_LABELS = {
     "co2": "ppm",
     "temperature": "°C",
@@ -90,6 +100,9 @@ def build_prompt(intent: Intent, data: dict) -> tuple[str, str]:
     Returns:
         A tuple of (system prompt, user prompt).
     """
+    if data.get("floor") is not None:
+        return SYSTEM_PROMPT, _prompt_floor(intent, data)
+
     builders = {
         "current": _prompt_current,
         "forecast": _prompt_forecast,
@@ -117,6 +130,9 @@ def _prompt_current(intent: Intent, data: dict) -> str:
         The user prompt.
     """
     readings = data.get("readings", {})
+    # Only what was asked: handed all five, Llama reported all five.
+    if intent.variables:
+        readings = {v: x for v, x in readings.items() if v in intent.variables}
     notes = _threshold_notes(readings)
 
     parts = [
@@ -286,6 +302,155 @@ def _prompt_anomaly(intent: Intent, data: dict) -> str:
             "pudieron evaluar, dilo y no inventes un diagnóstico.",
         ]
     )
+
+
+def _prompt_floor(intent: Intent, data: dict) -> str:
+    """Describe a whole floor: a summary first, then each room.
+
+    The summary (mean, lowest and highest room) comes computed from the API;
+    the model only reads it. Rooms are named by their room number, never by
+    id, so the answer cannot say "espacio 5".
+
+    Args:
+        intent: The classified question.
+        data: Built by api._floor_data: "floor", "kind", "rooms", "summary",
+            "without_data", "n_spaces" and, by kind, "timestamp",
+            "horizon_min", "method", "warning", "since", "until", "errors".
+
+    Returns:
+        The user prompt.
+    """
+    floor = data["floor"]
+    rooms = data.get("rooms", [])
+    without = data.get("without_data", [])
+    floor_name = "PLANTA BAJA (piso 0)" if floor == 0 else f"PISO {floor}"
+    floor_phrase = "la planta baja" if floor == 0 else f"el piso {floor}"
+    parts = [f"El usuario preguntó: «{intent.original_text}»", ""]
+
+    if data.get("state") == "unavailable":
+        parts += [
+            f"NO SE PUDO EVALUAR {floor_phrase}: {data.get('detail', '')}",
+            "Dile al usuario que esta capacidad aún no está disponible. "
+            "No afirmes que no hay anomalías.",
+        ]
+        return "\n".join(parts)
+
+    coverage = f"{floor_name}: {len(rooms)} de {data.get('n_spaces', '?')} espacios con datos."
+    if without:
+        coverage += f" Sin datos: {', '.join(without)}."
+    parts.append(coverage)
+
+    if not rooms:
+        parts += [
+            *[f"  {e}" for e in data.get("errors", [])],
+            "",
+            "Ningún espacio de este piso tiene datos para responder. Dilo así, "
+            "sin inventar valores.",
+        ]
+        return "\n".join(parts)
+
+    kind = data.get("kind")
+    summary = data.get("summary", {})
+
+    def summary_line(variable: str, s: dict) -> str:
+        unit = UNIT_LABELS.get(variable, "")
+        return (
+            f"  {variable}: promedio {_value(s.get('mean'))} {unit}; "
+            f"mínimo {_value(s.get('min'))} en {s.get('min_room')}; "
+            f"máximo {_value(s.get('max'))} en {s.get('max_room')}"
+        )
+
+    if kind == "forecast":
+        parts += [
+            "",
+            f"RESUMEN DEL PISO, predicción del GRU a +{data.get('horizon_min', '?')} min "
+            f"(método {data.get('method', '?')}):",
+            *[summary_line(v, s) for v, s in summary.items()],
+            "",
+            f"DETALLE POR SALÓN (ahora → en {data.get('horizon_min', '?')} min):",
+        ]
+        for room in rooms:
+            changes = ", ".join(
+                f"{v} {_value(room['current'].get(v))} → {_value(room['predicted'].get(v))} "
+                f"{UNIT_LABELS.get(v, '')}".rstrip()
+                + f" ({_trend(v, room['current'].get(v), room['predicted'].get(v))})"
+                for v in data.get("variables", [])
+            )
+            parts.append(f"  {room['room']}: {changes}")
+        if data.get("warning"):
+            parts += ["", f"ADVERTENCIA QUE DEBES TRANSMITIR: {data['warning']}"]
+    elif kind == "history":
+        variable = data.get("variables", ["co2"])[0]
+        unit = UNIT_LABELS.get(variable, "")
+        s = summary.get(variable, {})
+        parts += [
+            "",
+            f"RESUMEN DEL PISO, historial de {variable} "
+            f"({data.get('since', '?')} a {data.get('until', '?')}):",
+            f"  máximo {_value(s.get('max'))} {unit} en {s.get('max_room')}; "
+            f"mínimo {_value(s.get('min'))} {unit} en {s.get('min_room')}; "
+            f"promedio de los salones {_value(s.get('mean'))} {unit}",
+            "",
+            "DETALLE POR SALÓN:",
+        ]
+        for room in rooms:
+            r = room.get("summary", {})
+            parts.append(
+                f"  {room['room']}: máximo {_value(r.get('max'))}, mínimo "
+                f"{_value(r.get('min'))}, promedio {_value(r.get('promedio'))} {unit}".rstrip()
+            )
+    else:
+        parts += [
+            "",
+            f"RESUMEN DEL PISO (lecturas actuales, {data.get('timestamp', 'hora desconocida')}):",
+            *[summary_line(v, s) for v, s in summary.items()],
+            "",
+            "DETALLE POR SALÓN:",
+        ]
+        notes = []
+        for room in rooms:
+            parts.append(f"  {room['room']}: {_compact(room['readings'])}")
+            room_notes = _threshold_notes(room["readings"])
+            if room_notes:
+                notes += [f"  {room['room']}: {line.strip()}" for line in room_notes.splitlines()]
+        if notes:
+            parts += ["", "REFERENCIA DE RANGOS:", *notes]
+
+    if data.get("errors"):
+        parts += ["", "SALONES SIN PREDICCIÓN:", *[f"  {e}" for e in data["errors"]]]
+
+    parts += [
+        "",
+        "Responde en español usando solo estos datos. Primero resume el piso en "
+        "una oración (promedio y salones extremos); después dedica una oración "
+        "corta a cada salón. Para esta pregunta puedes pasar del límite de 3 "
+        "oraciones. Si hay espacios sin datos, menciónalo al final.",
+    ]
+    return "\n".join(parts)
+
+
+def _trend(variable: str, now: object, later: object) -> str:
+    """Say whether a value goes up, down or stays, with the change.
+
+    Written here and handed to the model as text: asked to read the direction
+    from two numbers, Llama answered "disminuirá de 665 a 728 ppm".
+
+    Args:
+        variable: Variable name, for its tolerance and unit.
+        now: Current value.
+        later: Predicted value.
+
+    Returns:
+        "sube 62.8 ppm", "baja 0.4 °C", "se mantiene", or "sin dato".
+    """
+    if not isinstance(now, (int, float)) or not isinstance(later, (int, float)):
+        return "sin dato"
+    change = later - now
+    if abs(change) < TREND_TOLERANCE.get(variable, 0.0):
+        return "se mantiene"
+    unit = UNIT_LABELS.get(variable, "") if variable != "motion" else ""
+    word = "sube" if change > 0 else "baja"
+    return f"{word} {abs(change):.1f} {unit}".rstrip()
 
 
 def _milestones(predictions: list[dict]) -> list[dict]:
