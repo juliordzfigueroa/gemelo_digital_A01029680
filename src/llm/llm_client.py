@@ -16,7 +16,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Initial implementation.
+    2026-11-03 - Read the Ollama address from common.config.
 
 Reference:
     Section 4.3.3 of the research document.
@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import httpx
 
-# Ollama listens here once installed; it runs as a background service on
-# Windows and does not need to be started by hand.
-HOST = "http://localhost:11434"
+from common import config as cfg
+
+# Ollama runs as a background service on Windows and does not need to be
+# started by hand. Set OLLAMA_URL to reach it on another machine.
+HOST = cfg.OLLAMA_URL
 CHAT_URL = f"{HOST}/api/chat"
 MODELS_URL = f"{HOST}/api/tags"
 

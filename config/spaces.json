@@ -1,6 +1,64 @@
 {
-  "_description": "Fuente única de espacios: la leen la limpieza, el clasificador, la API y el visor. espacio_id = piso*100 + numero. Un espacio existe aunque no tenga sensor; qué sensor mide qué espacio vive en sensores.csv.",
-  "_pending": "coordenadas en la nube de puntos (falta escaneo interior); tipos de pisos 0 y 1; el horario menciona S01_LAB, que no se incluyó porque no sigue la numeración.",
+  "_description": "Fuente única de espacios: la leen la limpieza, el clasificador, la API y el visor. space_id = piso*100 + número. Un espacio existe aunque no tenga sensor; qué sensor mide qué espacio vive en sensors.csv.",
+  "_floors": "cloud es la ruta de la nube convertida, relativa a la raíz del servidor de escaneos (SCANS_DIR). transform lleva el LAS de cada piso al marco común del edificio (el de Aulas_3_Completo 1.e57): p = R(rotation_deg)·p_piso + (dx, dy), z sin cambio; lo aplica scans.transform y se midió registrando un corte horizontal de cada piso contra el combinado (residual_cm = error mediano). marker es [x, y, z] en ese marco común; dimensions es {length, width, height} en metros.",
+  "_pending": "marker y dimensions de cada salón: se miden en el visor de Potree; tipos de pisos 0 y 1; el horario menciona S01_LAB, que no se incluyó porque no sigue la numeración.",
+  "floors": [
+    {
+      "floor": 0,
+      "cloud": "A3-P0/metadata.json",
+      "source": "Aulas_3.0.e57",
+      "transform": {
+        "rotation_deg": -0.0021,
+        "dx": -45.336,
+        "dy": 56.401,
+        "residual_cm": 0.2
+      }
+    },
+    {
+      "floor": 1,
+      "cloud": "A3-P1/metadata.json",
+      "source": "Aulas_3.1.e57",
+      "transform": {
+        "rotation_deg": -65.3612,
+        "dx": -89.932,
+        "dy": -30.268,
+        "residual_cm": 0.5
+      }
+    },
+    {
+      "floor": 2,
+      "cloud": "A3-P2/metadata.json",
+      "source": "Aulas_3.2.e57",
+      "transform": {
+        "rotation_deg": -65.3591,
+        "dx": -20.569,
+        "dy": 62.965,
+        "residual_cm": 0.2
+      }
+    },
+    {
+      "floor": 3,
+      "cloud": "A3-P3/metadata.json",
+      "source": "Aulas_3.3.e57",
+      "transform": {
+        "rotation_deg": -0.0017,
+        "dx": -23.803,
+        "dy": 61.514,
+        "residual_cm": 0.2
+      }
+    },
+    {
+      "floor": 4,
+      "cloud": "A3-P4/metadata.json",
+      "source": "Aulas_3.4.e57",
+      "transform": {
+        "rotation_deg": 0.0102,
+        "dx": -32.796,
+        "dy": 49.304,
+        "residual_cm": 0.3
+      }
+    }
+  ],
   "spaces": [
     {
       "space_id": 3,
@@ -11,7 +69,8 @@
       "alias": [
         "3003"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 6,
@@ -22,7 +81,8 @@
       "alias": [
         "3006"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 7,
@@ -33,7 +93,8 @@
       "alias": [
         "3007"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 107,
@@ -44,7 +105,8 @@
       "alias": [
         "3107"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 110,
@@ -55,7 +117,8 @@
       "alias": [
         "3110"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 111,
@@ -66,7 +129,8 @@
       "alias": [
         "3111"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 201,
@@ -77,7 +141,8 @@
       "alias": [
         "3201"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 202,
@@ -88,7 +153,8 @@
       "alias": [
         "3202"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 203,
@@ -99,7 +165,8 @@
       "alias": [
         "3203"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 204,
@@ -110,7 +177,8 @@
       "alias": [
         "3204"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 205,
@@ -121,7 +189,8 @@
       "alias": [
         "3205"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 206,
@@ -132,7 +201,8 @@
       "alias": [
         "3206"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 207,
@@ -143,7 +213,8 @@
       "alias": [
         "3207"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 208,
@@ -154,7 +225,8 @@
       "alias": [
         "3208"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 209,
@@ -165,7 +237,8 @@
       "alias": [
         "3209"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 301,
@@ -176,7 +249,8 @@
       "alias": [
         "3301"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 303,
@@ -187,7 +261,8 @@
       "alias": [
         "3303"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 304,
@@ -198,7 +273,8 @@
       "alias": [
         "3304"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 305,
@@ -209,7 +285,8 @@
       "alias": [
         "3305"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 306,
@@ -220,7 +297,8 @@
       "alias": [
         "3306"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 308,
@@ -231,7 +309,8 @@
       "alias": [
         "3308"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 309,
@@ -242,7 +321,8 @@
       "alias": [
         "3309"
       ],
-      "coordinates": null
+      "marker": null,
+      "dimensions": null
     },
     {
       "space_id": 401,
@@ -251,7 +331,8 @@
       "kind": "open_office",
       "room": null,
       "alias": [],
-      "coordinates": null,
+      "marker": null,
+      "dimensions": null,
       "note": "Zona física sin describir: anotar cuál es"
     },
     {
@@ -261,7 +342,8 @@
       "kind": "open_office",
       "room": null,
       "alias": [],
-      "coordinates": null,
+      "marker": null,
+      "dimensions": null,
       "note": "Zona física sin describir: anotar cuál es"
     }
   ]
