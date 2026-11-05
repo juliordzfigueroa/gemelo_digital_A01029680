@@ -10,7 +10,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Added GRU_IMPLEMENTATION to switch recurrent implementations.
+    2026-11-03 - Added service addresses read from environment variables.
 
 Reference:
     Section 4.2.6 of the research document.
@@ -19,6 +19,7 @@ Reference:
     learning. arXiv:2509.26187.
 """
 
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +33,34 @@ REAL_DATA = PROCESSED_DATA / "aulas3.parquet"
 
 # Outdoor weather for the same period, written by ingestion.weather.
 WEATHER_DATA = PROCESSED_DATA / "weather.parquet"
+
+# Shared space registry: names for the classifier, floor clouds and markers
+# for the viewer.
+SPACES_FILE = ROOT / "config" / "spaces.json"
+VIEWER_DIR = ROOT / "web"
+
+# --- Services ----------------------------------------------------------------
+# Addresses come from the environment so the same code runs on this PC and in
+# a container in the Tec cloud; the defaults are the local setup.
+# OLLAMA_URL and not OLLAMA_HOST: Ollama itself reads OLLAMA_HOST as the
+# address it binds to, without a scheme, and sharing the name would break it.
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+
+# The scan server is a separate process (src/scans/server.py), so the clouds
+# can live on another machine than the API.
+SCANS_DIR = Path(os.environ.get("SCANS_DIR", r"D:\escaneos"))
+SCANS_URL = os.environ.get("SCANS_URL", "http://localhost:8100")
+SCANS_PORT = int(os.environ.get("SCANS_PORT", "8100"))
+POTREE_CONVERTER = Path(os.environ.get(
+    "POTREE_CONVERTER",
+    r"D:\tools\PotreeConverter\PotreeConverter_2.1.5_x64_windows\PotreeConverter.exe",
+))
+
+# Pages allowed to read the clouds from another origin. The viewer is served by
+# the API, so by default that is the API address.
+VIEWER_ORIGINS = os.environ.get(
+    "VIEWER_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"
+).split(",")
 
 # Campus location, for weather queries and solar position. The sensor
 # timestamps are local time, so weather is requested in the same zone.

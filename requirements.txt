@@ -12,7 +12,7 @@
 #     pip install torch --index-url https://download.pytorch.org/whl/cu128
 #
 # Sin GPU NVIDIA, `pip install torch` a secas instala la build de CPU y todo
-# el pipeline corre igual. Ver la seccion "Instalacion desde cero" del README.
+# el pipeline corre igual. Ver la seccion "Instalacion" del README.
 #
 # Version instalada aqui: torch==2.11.0+cu128
 

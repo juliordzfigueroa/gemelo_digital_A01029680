@@ -1,7 +1,8 @@
 """Rule-based intent classifier for the user's question.
 
 Routes a question to one of four intents so the orchestrator knows which data
-to retrieve before calling the LLM. Deliberately deterministic: the same
+to retrieve before calling the LLM, and reads what the question is about: one
+space ("3308") or a whole floor ("piso 3", "tercer piso", "planta baja"). Deliberately deterministic: the same
 question always yields the same intent, and no model call is involved.
 
 Using the LLM to classify would add a second failure mode to every request.
@@ -16,7 +17,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Initial implementation.
+    2026-11-05 - Read the floor a question names.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -81,7 +82,7 @@ VARIABLE_SYNONYMS = {
     "motion": ["movimiento", "ocupación", "ocupacion", "personas", "gente", "ocupado"],
 }
 
-def load_spaces(path: Path = cfg.ROOT / "config" / "spaces.json") -> dict[int, list[str]]:
+def load_spaces(path: Path = cfg.SPACES_FILE) -> dict[int, list[str]]:
     """Read the words that name each space from the shared registry.
 
     Args:
@@ -103,7 +104,33 @@ def load_spaces(path: Path = cfg.ROOT / "config" / "spaces.json") -> dict[int, l
     return output
 
 
+def load_floor_spaces(path: Path = cfg.SPACES_FILE) -> dict[int, list[int]]:
+    """Group the registered spaces by floor.
+
+    Args:
+        path: The shared space registry.
+
+    Returns:
+        A dict from floor number to the space ids on that floor.
+    """
+    data = json.loads(path.read_text(encoding="utf-8"))
+    output: dict[int, list[int]] = {}
+    for space in data["spaces"]:
+        output.setdefault(int(space["floor"]), []).append(int(space["space_id"]))
+    return output
+
+
 SPACES = load_spaces()
+FLOOR_SPACES = load_floor_spaces()
+
+# Floor 0 is the ground floor ("planta baja"); "primer piso" is floor 1, as
+# the room numbers say (3305 is on floor 3).
+FLOOR_NUMBER_WORDS = {"cero": 0, "uno": 1, "dos": 2, "tres": 3, "cuatro": 4}
+FLOOR_ORDINALS = {
+    "primer": 1, "primero": 1, "segundo": 2,
+    "tercer": 3, "tercero": 3, "cuarto": 4,
+}
+FLOOR_NOUN = r"(?:piso|nivel|planta)"
 
 # Horizon ceiling, kept in sync with the iterative predictor.
 MAX_HORIZON_MIN = 120
@@ -118,6 +145,8 @@ class Intent:
         tipo: One of "predictiva", "actual", "historica" or "anomalia".
         variables: Variables the question mentions. Empty means all of them.
         space_id: Space the question refers to, or None if it names none.
+        floor: Floor the question refers to, or None. Only set when the
+            question names no space: "el 3308 del piso 3" is about 3308.
         horizon_min: Minutes ahead, meaningful only when tipo is
             "predictiva".
         original_text: The question as the user typed it, so the prompt can
@@ -127,6 +156,7 @@ class Intent:
     kind: str
     variables: list[str] = field(default_factory=list)
     space_id: int | None = None
+    floor: int | None = None
     horizon_min: int = DEFAULT_HORIZON
     original_text: str = ""
 
@@ -145,11 +175,13 @@ def classify(question: str) -> Intent:
     """
     text = question.lower().strip()
     kind = _detect_kind(text)
+    space_id = _extract_space(text)
 
     return Intent(
         kind=kind,
         variables=_extract_variables(text),
-        space_id=_extract_space(text),
+        space_id=space_id,
+        floor=_extract_floor(text) if space_id is None else None,
         horizon_min=(
             _extract_horizon(text)
             if kind == "forecast"
@@ -254,6 +286,37 @@ def _extract_space(text: str) -> int | None:
     return None
 
 
+def _extract_floor(text: str) -> int | None:
+    """Find which floor the question refers to.
+
+    Needs the word "piso", "nivel" or "planta" next to the number, so "en dos
+    horas" or a room number is never read as a floor. "Cuarto" alone means a
+    room in Spanish, so it only counts as an ordinal next to one of those
+    words.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        The floor number, or None when the question names no floor of the
+        building.
+    """
+    floor = None
+    if "planta baja" in text:
+        floor = 0
+    elif found := re.search(rf"\b{FLOOR_NOUN}\s+(\d+)\b", text):
+        floor = int(found.group(1))
+    elif found := re.search(
+        rf"\b{FLOOR_NOUN}\s+({'|'.join(FLOOR_NUMBER_WORDS)})\b", text
+    ):
+        floor = FLOOR_NUMBER_WORDS[found.group(1)]
+    elif found := re.search(
+        rf"\b({'|'.join(FLOOR_ORDINALS)})\s+{FLOOR_NOUN}\b", text
+    ) or re.search(rf"\b{FLOOR_NOUN}\s+({'|'.join(FLOOR_ORDINALS)})\b", text):
+        floor = FLOOR_ORDINALS[found.group(1)]
+    return floor if floor in FLOOR_SPACES else None
+
+
 def _extract_horizon(text: str) -> int:
     """Read the prediction horizon in minutes.
 
@@ -326,16 +389,22 @@ def main() -> int:
         "¿El CO2 está demasiado alto?",
         "¿Y el 3305?",
         "¿El CO2 va a estar muy alto en una hora?",
+        "¿Cómo está el piso 3?",
+        "¿Cómo va a estar la temperatura del segundo piso en una hora?",
+        "¿Cuál fue el máximo de CO2 en la planta baja?",
+        "¿Cómo está el 3308 del piso 3?",
+        "¿Cómo está el cuarto 3305?",
     ]
 
-    print(f"{'question':52} {'kind':11} {'esp':>4} {'min':>4}  variables")
-    print("-" * 100)
+    print(f"{'question':62} {'kind':9} {'esp':>4} {'piso':>4} {'min':>4}  variables")
+    print("-" * 110)
     for question in examples:
         i = classify(question)
         space = i.space_id if i.space_id is not None else "-"
+        floor = i.floor if i.floor is not None else "-"
         variables = ", ".join(i.variables) if i.variables else "(todas)"
         print(
-            f"{question[:52]:52} {i.kind:11} {str(space):>4} "
+            f"{question[:62]:62} {i.kind:9} {str(space):>4} {str(floor):>4} "
             f"{i.horizon_min:>4}  {variables}"
         )
     return 0

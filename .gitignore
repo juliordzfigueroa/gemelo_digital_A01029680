@@ -36,3 +36,6 @@ config.local.*
 # Sistema
 Thumbs.db
 .DS_Store
+
+# Visor: la librería de Potree se descarga aparte (ver README)
+web/potree/
