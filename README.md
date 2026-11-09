@@ -331,7 +331,8 @@ el salón, por ejemplo "¿cómo está el CO₂ del 3308?" (lectura actual) o "¿
 va a estar el CO₂ del 3308 en 30 minutos?" (pronóstico del GRU). Si no nombras
 salón ni piso, te pregunta cuál. También por piso:
 "¿cómo está el piso 3?" responde con un resumen del piso y después salón por
-salón, y deja visible solo ese piso. Bajo cada respuesta aparece qué tipo de
+salón, y deja visible solo ese piso; "todos los salones" hace lo mismo con el
+edificio completo. Bajo cada respuesta aparece qué tipo de
 pregunta detectó, el salón o piso y, si hubo pronóstico, el método. Todo lo
 que se le puede preguntar, y lo que todavía no, está en
 [src/llm/README.md](src/llm/README.md#qué-se-le-puede-preguntar). Para apagar,
@@ -607,7 +608,10 @@ Separar la nube por salón es difícil, así que cada salón se representa con u
 **marcador** (un punto) y sus **dimensiones**, guardados en
 `config/spaces.json`. El marcador pone en la escena una etiqueta con el número
 del salón y sus lecturas; las dimensiones dan el volumen *V* que usa el
-balance de masa del CO₂ del generador físico. Se miden en el mismo visor:
+balance de masa del CO₂ del generador físico. Se miden en el mismo visor,
+con un panel que **no aparece en la vista normal** para no confundir a quien
+solo quiere preguntar: se abre con
+[localhost:8000/viewer/?medir](http://localhost:8000/viewer/?medir).
 
 1. Abre el menú de Potree (botón arriba a la izquierda) → *Herramientas* →
    medir un punto, y haz clic en el centro del salón.

@@ -7,8 +7,31 @@ Llama 3.1 8B servido por Ollama, orquestado por FastAPI.
 
 ## Qué se le puede preguntar
 
-Desde el chat del visor o `POST /chat`. Cada pregunta tiene un **tipo**, que
-decide qué datos se buscan, y un **objetivo**: un salón o un piso entero.
+Desde el chat del visor o `POST /chat`. Hay dos familias de respuesta:
+
+- **Respuestas con datos.** Cuatro tipos (lectura actual, pronóstico,
+  histórico, anomalía) sobre un objetivo (un salón, un piso o todo el
+  edificio). Los números los pone el código; Llama redacta.
+- **Respuestas de la herramienta.** Saludos, agradecimientos, preguntas
+  fuera de tema, preguntas que no dicen dónde, salones que no existen y
+  salones sin sensor. No llevan datos que redactar, así que las contesta el
+  código con frases fijas de `replies.py`, sin llamar a Llama.
+
+```
+pregunta ─► clasificador ─┬─ ¿nombra salón, piso o edificio? ── sí ─► respuesta con datos (Llama)
+                          │                                            o "no tiene sensor"
+                          └─ no ─┬─ pide algo de un chatbot general ─► fuera de tema
+                                 ├─ habla del edificio (variable, ─────► "¿de qué salón o piso?"
+                                 │   tiempo, salón, lecturas…)
+                                 ├─ "gracias" ────────────────────────► agradecimiento
+                                 ├─ saludo o "¿qué eres?" ────────────► presentación
+                                 └─ nada reconocible ─────────────────► fuera de tema
+```
+
+### Respuestas con datos
+
+Cada pregunta tiene un **tipo**, que decide qué datos se buscan, y un
+**objetivo**.
 
 | Tipo | Ejemplo | Qué responde |
 |---|---|---|
@@ -17,31 +40,63 @@ decide qué datos se buscan, y un **objetivo**: un salón o un piso entero.
 | Histórico | "¿Cuál fue el máximo de CO₂ en el 3206?" | Máximo, mínimo y promedio de **una** variable en las últimas 24 h |
 | Anomalía | "¿Hay algo raro en el 3305?" | Que el detector todavía no existe; nunca un "todo bien" inventado |
 
-| Objetivo | Cómo se reconoce | Qué cambia en la respuesta |
+| Objetivo | Cómo se reconoce | Qué responde |
 |---|---|---|
-| Un salón | Su número o alias en el texto: "3308" | Datos de ese salón |
-| Un piso | "piso 3", "piso tres", "tercer piso", "nivel 2", "planta baja" (piso 0) | Primero un resumen del piso (promedio, salón más alto y más bajo), después una oración por salón, y al final los espacios sin datos. El visor deja visible solo ese piso |
-| Ninguno | — | Pregunta "¿Sobre qué salón o piso?", sin llamar a Llama. Nunca responde sobre un salón por omisión |
+| Un salón | Su número o alias en el texto: "3308", "sala de cómputo" | Datos de ese salón |
+| Un piso | "piso 3", "piso tres", "tercer piso", "nivel 2", "planta baja" (piso 0) | Un resumen de Llama (promedio, espacios extremos, lo que esté fuera de rango), después una línea por salón y los espacios sin sensor. El visor deja visible solo ese piso |
+| Todo el edificio | "todos los salones", "todo el edificio", "el edificio", "todo", "todos", "resumen general" (como palabras completas: "método" no cuenta) | Igual que un piso, con todos los espacios con datos; los que no tienen sensor se cuentan en vez de listarse |
+
+### Respuestas de la herramienta
+
+Se contestan **sin llamar a Llama**, con frases de `replies.py`. Están
+escritas en tono de conversación, porque son lo primero que ve alguien nuevo,
+y las más frecuentes tienen dos versiones para que el chat no se repita. La
+versión depende del texto de la pregunta, así que la misma pregunta siempre
+recibe la misma respuesta y una demostración se puede repetir.
+
+| Caso | Ejemplo | Respuesta |
+|---|---|---|
+| Saludo o pregunta sobre el asistente | "hola", "¿qué puedes hacer?", "¿qué es esto?" | Se presenta: qué sabe y ejemplos de preguntas |
+| Agradecimiento | "gracias" | "¡Con gusto! Si quieres saber algo más del edificio, aquí sigo." |
+| Fuera de tema (pregunta de chatbot general) | "¿cuál es la capital de Francia?", "escríbeme un poema", "explícame qué es el CO₂", "¿qué opinas de…?" | Que no es un asistente general y qué sí puede responder |
+| Pregunta del edificio sin lugar | "¿cómo está el CO₂?", "¿cómo están los valores?" | "¿De qué salón o piso te gustaría saber?". Nunca responde sobre un salón por omisión |
+| Salón que no existe | "3310", "2905" | Que no está registrado y qué salones hay en ese piso; o que los salones de Aulas 3 empiezan con 3 |
+| Salón sin sensor | "3309" | Que no tiene sensor y cuáles sí tienen datos |
+| Alias | "3302" | Que corresponde al 3301 (el 3302 no existe físicamente) |
 
 Si el texto nombra un salón y un piso ("el 3308 del piso 3"), gana el salón.
 `POST /chat` acepta además un `space_id` para clientes que tengan un salón
 seleccionado; el texto gana sobre él. El visor no lo manda.
 
-**Lo que todavía no puede:** comparar dos salones, fechas u horas concretas
-("el martes a las 10"), más de una variable en el histórico, detectar
-anomalías, y datos en vivo: "ahora" es la última lectura del archivo limpio.
-Solo hay datos de 3206, 3208, 3305 y 3308 (el 3304 tiene el sensor de gas
-muerto).
+Cómo distingue los casos sin lugar (`classifier._detect_chat`): las peticiones
+de chatbot general ("escribe", "explícame", "poema", "capital de", "opinas"…)
+ganan siempre, aunque mencionen una variable, porque "explícame qué es el CO₂"
+pide una lección, no una lectura. Si no, cualquier palabra del edificio (una
+variable, "salón", "lecturas", "mañana", "máximo"…) la marca como pregunta del
+edificio a la que solo le falta el lugar. Lo que queda es saludo,
+agradecimiento o fuera de tema. Las frases genéricas ("cuál es", "hoy") no
+cuentan como palabras del edificio, porque también las tiene "¿cuál es la
+capital de Francia?".
+
+**Lo que todavía no puede:** recordar la pregunta anterior ("¿y en una
+hora?"), comparar dos salones, fechas u horas concretas ("el martes a las
+10"), más de una variable en el histórico, detectar anomalías, y datos en
+vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
+3208, 3304 (sin CO₂ casi siempre), 3305, 3308 y la oficina 4-2.
 
 **Fallas conocidas de redacción:** Llama omite a veces la advertencia de la
-predicción iterativa (el visor la muestra igual, debajo de la respuesta) y
-exagera adjetivos ("luz muy alta" con 15 %).
+predicción iterativa (el visor la muestra igual, debajo de la respuesta) y a
+veces omite el nombre del salón extremo en el resumen.
 
-**Ya corregidas, quitándole la decisión al modelo:** la dirección de una
-tendencia va escrita en el prompt ("sube 62.8 ppm"), porque con los dos números
-solos dijo "disminuirá de 665 a 728 ppm"; el prompt nombra el salón por su
-número y no por su id ("espacio 308"); y la lectura actual solo lleva las
-variables que se preguntaron, porque con las cinco las reportaba todas.
+**Ya corregidas, quitándole la decisión al modelo:**
+
+| Falla observada | Corrección |
+|---|---|
+| "Disminuirá de 665 a 728 ppm" (sube) | La dirección va escrita en el prompt: "sube 62.8 ppm" |
+| "Espacio 308", "espacio 5", "space_4_2" | El prompt nombra cada espacio por su número de salón u "oficina 4-2" |
+| Reportaba las cinco variables cuando se preguntó por una | La lectura actual solo lleva las variables preguntadas |
+| Inventó los salones 3310 a 3334 como "espacios sin datos" | Llama solo escribe el resumen; el detalle por salón y la lista de espacios sin sensor los escribe el código |
+| Respuestas de piso cortadas a la mitad y adjetivos exagerados ("632 ppm es alta") | Mismo arreglo: el resumen es corto y solo puede usar los adjetivos de la sección FUERA DE RANGO del prompt |
 
 ---
 
@@ -51,9 +106,11 @@ Una pregunta recorre cuatro pasos y cada uno tiene un dueño distinto:
 
 ```
 classifier.py   decide de qué tipo es la pregunta       (reglas, sin LLM)
-api/api.py        recupera los datos que ese tipo pide    (GRU, BD, detector)
-context.py       arma el prompt con esos datos           (plantillas)
-llm_client.py    pide la frase al modelo                 (HTTP a Ollama)
+api/api.py      recupera los datos que ese tipo pide    (GRU, BD, detector)
+context.py      arma el prompt con esos datos           (plantillas)
+                y escribe el detalle por salón
+llm_client.py   pide la frase al modelo                 (HTTP a Ollama)
+replies.py      frases fijas de la herramienta          (sin LLM)
 ```
 
 **Todos los números salen de los tres primeros pasos. El LLM solo redacta.**
