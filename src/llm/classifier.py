@@ -69,6 +69,7 @@ CURRENT_WORDS = [
     "cuál es", "cual es", "cuáles son", "cuales son",
     "actual", "cómo está", "como esta", "cómo se encuentra",
     "lectura", "dime el", "dime la",
+    "valores", "datos", "estado", "muéstrame", "muestrame", "quiero ver",
 ]
 
 # Maps each active variable to the words a user might use for it. Keys come
@@ -132,6 +133,56 @@ FLOOR_ORDINALS = {
 }
 FLOOR_NOUN = r"(?:piso|nivel|planta)"
 
+# Phrases that ask about every space at once. Matched as whole words: "todo"
+# is inside "método", and a substring match would send "¿qué método usas?"
+# to the whole building.
+BUILDING_WORDS = [
+    "todos los salones", "todas las aulas", "todos los espacios",
+    "todo el edificio", "el edificio", "edificio completo",
+    "cada salón", "cada salon", "en general", "resumen general",
+    "todo", "toda", "todos", "todas",
+]
+
+# Room numbers are building 3, then floor, then room: 3305 is floor 3,
+# room 05. Four digits from 1900 to 2099 are read as years, not rooms.
+ROOM_NUMBER = re.compile(r"\b(\d{4})\b")
+
+# --- Messages that are not questions about the building --------------------
+# All matched as whole words, and only when the question names no space,
+# floor or the building: "hola, ¿cómo está el 3308?" is a question about 3308.
+
+# Words that tie a question to the building even without naming a room.
+# Generic phrasing ("cuál es", "hoy") is not here on purpose: "¿cuál es la
+# capital de Francia?" has it too.
+DOMAIN_WORDS = [
+    "salón", "salon", "salones", "aula", "aulas", "piso", "pisos",
+    "edificio", "oficina", "oficinas", "sensor", "sensores",
+    "lectura", "lecturas", "valores", "datos", "medición", "medicion",
+    "mediciones", "estado", "ambiente", "ventilación", "ventilacion", "ventilar",
+]
+
+# About the assistant itself: greetings and "what is this".
+HELP_WORDS = [
+    "hola", "buenos días", "buenos dias", "buenas tardes", "buenas noches",
+    "buenas", "qué eres", "que eres", "quién eres", "quien eres",
+    "qué puedes", "que puedes", "qué sabes", "que sabes", "qué haces",
+    "que haces", "para qué sirves", "para que sirves", "cómo funciona",
+    "como funciona", "cómo te uso", "como te uso", "ayuda", "es esto",
+    "instrucciones",
+]
+
+THANKS_WORDS = ["gracias", "te agradezco", "muy amable"]
+
+# Requests a general-purpose chatbot would take and this one cannot.
+OUT_OF_SCOPE_WORDS = [
+    "escribe", "escríbeme", "escribeme", "redacta", "redáctame", "traduce",
+    "explícame", "explicame", "explica", "poema", "chiste", "cuento",
+    "canción", "cancion", "receta", "capital de", "quién fue", "quien fue",
+    "quién es", "quien es", "programa", "código", "codigo", "tarea", "ensayo",
+    "opinas", "opinión", "opinion", "chatgpt", "noticias", "película",
+    "pelicula", "fútbol", "futbol", "hace en",
+]
+
 # Horizon ceiling, kept in sync with the iterative predictor.
 MAX_HORIZON_MIN = 120
 DEFAULT_HORIZON = 30
@@ -142,13 +193,20 @@ class Intent:
     """What the orchestrator needs to know before fetching data.
 
     Attributes:
-        tipo: One of "predictiva", "actual", "historica" or "anomalia".
+        kind: One of "current", "forecast", "history" or "anomaly".
         variables: Variables the question mentions. Empty means all of them.
         space_id: Space the question refers to, or None if it names none.
         floor: Floor the question refers to, or None. Only set when the
             question names no space: "el 3308 del piso 3" is about 3308.
-        horizon_min: Minutes ahead, meaningful only when tipo is
-            "predictiva".
+        building: The question asks about every space ("todos los
+            salones", "el edificio"). Only set when it names no space or floor.
+        unknown_room: A room-like number that is not in the registry
+            ("3310"), so the answer can say so instead of asking which room.
+        chat: Set when the message is not a question about the building:
+            "help" (a greeting or "what is this"), "thanks", or
+            "out_of_scope" (something a general chatbot would answer, or
+            nothing recognizable at all). None for building questions.
+        horizon_min: Minutes ahead, meaningful only when kind is "forecast".
         original_text: The question as the user typed it, so the prompt can
             quote it back verbatim.
     """
@@ -157,6 +215,9 @@ class Intent:
     variables: list[str] = field(default_factory=list)
     space_id: int | None = None
     floor: int | None = None
+    building: bool = False
+    unknown_room: str | None = None
+    chat: str | None = None
     horizon_min: int = DEFAULT_HORIZON
     original_text: str = ""
 
@@ -175,13 +236,23 @@ def classify(question: str) -> Intent:
     """
     text = question.lower().strip()
     kind = _detect_kind(text)
+    variables = _extract_variables(text)
     space_id = _extract_space(text)
+    floor = _extract_floor(text) if space_id is None else None
+    building = (
+        space_id is None and floor is None and _contains_word(text, BUILDING_WORDS)
+    )
+    unknown_room = _extract_unknown_room(text) if space_id is None else None
+    has_target = space_id is not None or floor is not None or building or unknown_room
 
     return Intent(
         kind=kind,
-        variables=_extract_variables(text),
+        variables=variables,
         space_id=space_id,
-        floor=_extract_floor(text) if space_id is None else None,
+        floor=floor,
+        building=building,
+        unknown_room=unknown_room,
+        chat=None if has_target else _detect_chat(text, variables),
         horizon_min=(
             _extract_horizon(text)
             if kind == "forecast"
@@ -189,6 +260,41 @@ def classify(question: str) -> Intent:
         ),
         original_text=question,
     )
+
+
+def _detect_chat(text: str, variables: list[str]) -> str | None:
+    """Tell a building question without a target from everything else.
+
+    Called only when the question names no space, floor or building. A
+    question that still mentions a variable, a time ahead or behind, an
+    anomaly or a building word ("¿cómo está el CO₂?") is about the building
+    and only lacks the place; anything else is not for this assistant.
+
+    Args:
+        text: The lowercased question.
+        variables: Variables found in it.
+
+    Returns:
+        "help", "thanks", "out_of_scope", or None for a building question
+        that only needs to say where.
+    """
+    about_building = bool(
+        variables
+        or _mentions_future(text)
+        or _contains_any(text, ANOMALY_WORDS + FORECAST_WORDS + HISTORY_WORDS)
+        or _contains_word(text, DOMAIN_WORDS)
+    )
+    # Explicit general-chatbot requests win even over building words:
+    # "explícame qué es el CO₂" asks for a lesson, not a reading.
+    if _contains_word(text, OUT_OF_SCOPE_WORDS):
+        return "out_of_scope"
+    if about_building:
+        return None
+    if _contains_word(text, THANKS_WORDS):
+        return "thanks"
+    if _contains_word(text, HELP_WORDS):
+        return "help"
+    return "out_of_scope"
 
 
 def _detect_kind(text: str) -> str:
@@ -317,6 +423,24 @@ def _extract_floor(text: str) -> int | None:
     return floor if floor in FLOOR_SPACES else None
 
 
+def _extract_unknown_room(text: str) -> str | None:
+    """Find a room-like number that the registry does not know.
+
+    Runs only when no registered space matched, so "3308" never gets here.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        The first four-digit number that is not a year, or None.
+    """
+    for found in ROOM_NUMBER.finditer(text):
+        number = found.group(1)
+        if not 1900 <= int(number) <= 2099:
+            return number
+    return None
+
+
 def _extract_horizon(text: str) -> int:
     """Read the prediction horizon in minutes.
 
@@ -373,6 +497,20 @@ def _contains_any(text: str, words: list[str]) -> bool:
     return any(word in text for word in words)
 
 
+def _contains_word(text: str, words: list[str]) -> bool:
+    """Test whether any phrase appears as whole words, not inside another word.
+
+    Args:
+        text: The lowercased question.
+        words: Phrases to look for.
+
+    Returns:
+        True if at least one phrase is present with word boundaries on both
+        sides ("todo" matches "de todo" but not "método").
+    """
+    return any(re.search(rf"\b{re.escape(word)}\b", text) for word in words)
+
+
 def main() -> int:
     """Classify a set of example questions and print the routing table.
 
@@ -394,10 +532,26 @@ def main() -> int:
         "¿Cuál fue el máximo de CO2 en la planta baja?",
         "¿Cómo está el 3308 del piso 3?",
         "¿Cómo está el cuarto 3305?",
+        "Qué chingados es esto?",
+        "Dame la temperatura de todos los salones",
+        "Todos",
+        "3310",
+        "2905",
+        "3302",
+        "¿Cómo está la sala de cómputo?",
+        "¿Cómo estuvo el CO2 del 3308 en octubre de 2026?",
+        "Hola",
+        "Gracias",
+        "¿Cuál es la capital de Francia?",
+        "Escríbeme un poema sobre el aire",
+        "Explícame qué es el CO2",
+        "¿Qué temperatura hace en París?",
+        "¿Cómo están los valores?",
+        "¿Qué opinas de la inteligencia artificial?",
     ]
 
-    print(f"{'question':62} {'kind':9} {'esp':>4} {'piso':>4} {'min':>4}  variables")
-    print("-" * 110)
+    print(f"{'question':62} {'kind':9} {'esp':>4} {'piso':>4} {'edif':>4} {'otro':>12} {'min':>4}  variables")
+    print("-" * 120)
     for question in examples:
         i = classify(question)
         space = i.space_id if i.space_id is not None else "-"
@@ -405,6 +559,7 @@ def main() -> int:
         variables = ", ".join(i.variables) if i.variables else "(todas)"
         print(
             f"{question[:62]:62} {i.kind:9} {str(space):>4} {str(floor):>4} "
+            f"{'sí' if i.building else '-':>4} {i.unknown_room or i.chat or '-':>12} "
             f"{i.horizon_min:>4}  {variables}"
         )
     return 0
