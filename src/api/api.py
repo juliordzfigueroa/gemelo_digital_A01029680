@@ -44,7 +44,7 @@ from pydantic import BaseModel, Field
 from common import config as cfg
 from common import data as dat
 from gru import predict as pred
-from llm import classifier, llm_client, context
+from llm import classifier, context, llm_client, replies
 
 # Default span for a historical question when the user names no period.
 HISTORY_HOURS = 24
@@ -83,6 +83,7 @@ class Answer(BaseModel):
     intent_type: str
     space: int | None
     floor: int | None = None
+    building: bool = False
     horizon_min: int | None
     forecast_method: str | None
     warning: str | None
@@ -235,7 +236,7 @@ def _history_data(
 def _anomaly_data(space_id: int) -> dict:
     """Report what the anomaly detector found.
 
-    TODO E5: replace with a call to src/anomalias/detector.py once it exists.
+    TODO E5: replace with a call to the anomaly detector once it exists.
 
     Until then this returns "no_disponible" rather than an empty list of
     anomalies. The distinction matters: an empty list means the detector ran
@@ -253,7 +254,7 @@ def _anomaly_data(space_id: int) -> dict:
         "state": "unavailable",
         "anomalies": [],
         "detail": (
-            "El detector 3σ (src/anomalias/) todavía no está implementado, "
+            "El detector de anomalías (regla 3σ) todavía no está implementado, "
             "así que no se ha evaluado si hay anomalías."
         ),
     }
@@ -293,7 +294,7 @@ def _forecast_data(intent: classifier.Intent, space_id: int) -> dict:
             "predictions": [],
             "error": (
                 f"No hay {metadata['input_steps']} lecturas consecutivas "
-                f"para el espacio {space_id}, así que no se puede predecir."
+                "recientes, así que no se puede predecir."
             ),
         }
 
@@ -346,16 +347,24 @@ def _number(value: object) -> float | None:
 def _space_labels() -> dict[int, str]:
     """Return the name a person uses for each space.
 
-    The room number when there is one ("3308"), the registry name otherwise.
-    The prompt gets these instead of ids so the answer never says "espacio 5".
+    The room number when there is one ("3308"). Spaces without one, like the
+    open offices of floor 4, get a readable name built from the registry name
+    ("space_4_2" becomes "oficina 4-2"). The prompt gets these instead of ids
+    so the answer never says "espacio 5" or "space_4_2".
 
     Returns:
         A dict from space id to its label.
     """
     registry = json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
-    return {
-        int(s["space_id"]): s.get("room") or s["name"] for s in registry["spaces"]
-    }
+    labels = {}
+    for s in registry["spaces"]:
+        if s.get("room"):
+            label = s["room"]
+        else:
+            number = s["name"].removeprefix("space_").replace("_", "-")
+            label = f"oficina {number}" if s.get("kind") == "open_office" else f"espacio {number}"
+        labels[int(s["space_id"])] = label
+    return labels
 
 
 def _floor_summary(rooms: list[dict], key: str, variables: list[str]) -> dict:
@@ -392,28 +401,32 @@ def _floor_summary(rooms: list[dict], key: str, variables: list[str]) -> dict:
     return summary
 
 
-def _floor_data(intent: classifier.Intent, floor: int) -> dict:
-    """Retrieve what a question about a whole floor needs.
+def _floor_data(intent: classifier.Intent, floor: int | None) -> dict:
+    """Retrieve what a question about a whole floor, or the building, needs.
 
     Runs the same per-space retrieval as a single-space question for every
-    space on the floor that has readings, and adds a floor summary. Spaces
-    without a sensor are listed by name so the answer can say the floor is
-    only partly measured.
+    space that has readings, and adds a summary. Spaces without a sensor are
+    named so the answer can say the floor is only partly measured.
 
     TODO E5: inherits the stand-in data source of the per-space functions.
 
     Args:
         intent: The classified question; carries the kind, the variables
             and, for forecasts, the horizon.
-        floor: Floor number.
+        floor: Floor number, or None for every space in the building.
 
     Returns:
-        A dict shaped for context._prompt_floor, marked with "floor".
+        A dict shaped for context._prompt_floor, with "scope" set to
+        "floor" or "building".
     """
     labels = _space_labels()
-    space_ids = sorted(classifier.FLOOR_SPACES.get(floor, []))
+    if floor is None:
+        space_ids = sorted(s for spaces in classifier.FLOOR_SPACES.values() for s in spaces)
+    else:
+        space_ids = sorted(classifier.FLOOR_SPACES.get(floor, []))
     variables = intent.variables or list(cfg.ACTIVE_VARIABLES)
     data: dict[str, Any] = {
+        "scope": "building" if floor is None else "floor",
         "floor": floor,
         "kind": intent.kind,
         "variables": variables,
@@ -442,7 +455,8 @@ def _floor_data(intent: classifier.Intent, floor: int) -> dict:
         if intent.kind == "forecast":
             item = _forecast_data(intent, space_id)
             if item.get("error"):
-                data["errors"].append(f"{room}: {item['error']}")
+                reason = item["error"].split(", así que")[0].rstrip(".")
+                data["errors"].append({"room": room, "reason": reason[:1].lower() + reason[1:]})
                 continue
             last = item["predictions"][-1] if item["predictions"] else {}
             data["rooms"].append({
@@ -544,35 +558,113 @@ def _chosen_space(intent: classifier.Intent, requested: int | None) -> int:
 def _target_and_data(
     intent: classifier.Intent, requested: int | None
 ) -> tuple[int | None, int | None, dict]:
-    """Decide whether the answer is about one space or a floor, and fetch it.
+    """Decide what the answer is about, and fetch it.
 
-    Order of precedence: a space named in the text, then a floor named in the
-    text, then the space selected in the viewer. The classifier only sets a
-    floor when the text names no space.
+    Order of precedence: a space named in the text, an unknown room number,
+    a floor, the whole building, and last the space sent in the request
+    body. Several outcomes need no LLM at all and come back as a "direct"
+    sentence: an off-topic question, no target, an unknown room, or a room
+    without a sensor. A fixed sentence there is both faster and safer than
+    asking the model to explain an absence.
 
     Args:
         intent: The classified question.
         requested: Space id sent in the request body, if any.
 
     Returns:
-        The space id (None for a floor question), the floor (None for a
-        space question) and the data dict for context.build_prompt().
+        The space id (None unless the answer is about one space), the floor
+        (None unless it is about one floor) and the data dict, which holds
+        either the input for context.build_prompt() or a "direct" answer.
     """
-    if intent.floor is not None:
-        return None, intent.floor, _floor_data(intent, intent.floor)
-    if intent.space_id is None and requested is None:
-        # Nothing names a target. Answering about a default space would
-        # report on a room the user never asked about, so ask instead.
-        return None, None, {"needs_target": True}
+    question = intent.original_text
+    if intent.space_id is None:
+        if intent.unknown_room:
+            return None, None, {"direct": _unknown_room_message(intent.unknown_room, question)}
+        if intent.floor is not None:
+            return None, intent.floor, _floor_data(intent, intent.floor)
+        if intent.building:
+            return None, None, _floor_data(intent, None)
+        if intent.chat:
+            return None, None, {"direct": replies.reply(intent.chat, question)}
+        if requested is None:
+            # A building question that does not say where. Answering about a
+            # default space would report on a room the user never asked about.
+            return None, None, {"direct": replies.reply("ask_target", question)}
+
     space = _chosen_space(intent, requested)
+    if _space_rows(space).empty:
+        return space, None, {"direct": _no_sensor_message(space, question)}
     return space, None, _retrieve(intent, space)
 
 
-# Sent as-is, without the LLM, when the question names no room or floor.
-ASK_FOR_TARGET = (
-    "¿Sobre qué salón o piso? Por ejemplo: «¿cómo está el CO₂ del 3308?» o "
-    "«¿cómo está el piso 3?»."
-)
+def _with_article(label: str) -> str:
+    """Put the right article before a space label: "el 3309", "la oficina 4-1"."""
+    return f"la {label}" if label.startswith("oficina") else f"el {label}"
+
+
+def _rooms_with_data() -> list[str]:
+    """Return the labels of the spaces that have readings, sorted."""
+    labels = _space_labels()
+    ids = sorted(int(s) for s in STATE["data"][cfg.SPACE_COLUMN].unique())
+    return [str(labels.get(s, s)) for s in ids]
+
+
+def _unknown_room_message(number: str, question: str = "") -> str:
+    """Say that a room number is not in the registry, and what is.
+
+    Args:
+        number: The four-digit number from the question.
+        question: The question as typed, to pick the wording.
+
+    Returns:
+        A sentence for the user.
+    """
+    if not number.startswith("3"):
+        return replies.reply("unknown_room_other_building", question, number=number)
+    floor = int(number[1])
+    if floor not in classifier.FLOOR_SPACES:
+        return replies.reply(
+            "unknown_room_no_floor", question, number=number,
+            top_floor=max(classifier.FLOOR_SPACES),
+        )
+    labels = _space_labels()
+    known = replies.spoken_list(
+        [str(labels[s]) for s in sorted(classifier.FLOOR_SPACES[floor])]
+    )
+    where = "la planta baja" if floor == 0 else f"el piso {floor}"
+    return replies.reply(
+        "unknown_room_floor", question, number=number, where=where, known=known
+    )
+
+
+def _no_sensor_message(space_id: int, question: str = "") -> str:
+    """Say that a registered space has no readings, and which spaces do.
+
+    Args:
+        space_id: A space with no rows in the data.
+        question: The question as typed. When it named the space by another
+            number (the 3302 is the 3301), the answer says so.
+
+    Returns:
+        A sentence for the user.
+    """
+    label = str(_space_labels().get(space_id, space_id))
+    registry = json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
+    aliases = next(
+        (s.get("alias", []) for s in registry["spaces"] if int(s["space_id"]) == space_id), []
+    )
+    asked = next(
+        (a for a in aliases if a != label and a.isdigit() and a in question.lower()), None
+    )
+    rooms = replies.spoken_list(
+        [_with_article(r) if r.startswith("oficina") else r for r in _rooms_with_data()]
+    )
+    if asked:
+        return replies.reply("no_sensor_alias", question, asked=asked, label=label, rooms=rooms)
+    named = _with_article(label)
+    return replies.reply(
+        "no_sensor", question, subject=named[:1].upper() + named[1:], rooms=rooms
+    )
 
 
 # --------------------------------------------------------------------------
@@ -671,7 +763,7 @@ def context_for(question: Question) -> dict:
     """
     intent = classifier.classify(question.question)
     space, floor, data = _target_and_data(intent, question.space_id)
-    if data.get("needs_target"):
+    if data.get("direct"):
         system, user = None, None
     else:
         system, user = context.build_prompt(intent, data)
@@ -682,6 +774,8 @@ def context_for(question: Question) -> dict:
             "variables": intent.variables,
             "space_id": space,
             "floor": floor,
+            "building": data.get("scope") == "building",
+            "chat": intent.chat,
             "horizon_min": intent.horizon_min,
         },
         "data": data,
@@ -703,9 +797,9 @@ def chat(question: Question) -> Answer:
     """
     intent = classifier.classify(question.question)
     space, floor, data = _target_and_data(intent, question.space_id)
-    if data.get("needs_target"):
+    if data.get("direct"):
         return Answer(
-            response=ASK_FOR_TARGET, intent_type=intent.kind, space=None,
+            response=data["direct"], intent_type=intent.kind, space=space,
             floor=None, horizon_min=None, forecast_method=None, warning=None,
         )
     system, user = context.build_prompt(intent, data)
@@ -717,20 +811,22 @@ def chat(question: Question) -> Answer:
         # and the caller is better served by a sentence explaining what is
         # missing than by an error the viewer has to interpret.
         response = f"No puedo responder ahora mismo. {e}"
+    else:
+        detail = context.floor_detail(data) if data.get("scope") else ""
+        if detail:
+            response = f"{response.rstrip()}\n\n{detail}"
 
     return Answer(
         response=response,
         intent_type=intent.kind,
         space=space,
         floor=floor,
+        building=data.get("scope") == "building",
         horizon_min=(
             data.get("horizon_min") if intent.kind == "forecast" else None
         ),
         forecast_method=(
             data.get("method") if intent.kind == "forecast" else None
         ),
-        warning=(
-            data.get("warning") or data.get("error") or data.get("detail")
-            or "; ".join(data.get("errors") or []) or None
-        ),
+        warning=data.get("warning") or data.get("error") or data.get("detail"),
     )

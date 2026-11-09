@@ -16,6 +16,18 @@ const LABELS = {
 	motion: ["Movimiento", ""],
 };
 const SURVEY_KEY = "aulas3-survey";
+// The survey panel (markers and room sizes) is a tool for whoever maps the
+// building, not for the people asking questions. It only appears when the
+// page is opened with ?medir in the address.
+const SURVEY_MODE = new URLSearchParams(location.search).has("medir");
+// The API names question types in English (code identifiers); the person
+// reading the chat sees them in Spanish.
+const INTENT_LABELS = {
+	current: "lectura actual",
+	forecast: "pronóstico",
+	history: "histórico",
+	anomaly: "anomalía",
+};
 
 const state = {
 	spaces: [],
@@ -49,10 +61,15 @@ async function main() {
 		return;
 	}
 	state.spaces = registry.spaces;
-	fillSpaces();
+	if (SURVEY_MODE) {
+		fillSpaces();
+		setupSurvey();
+	} else {
+		$id("survey").remove();
+	}
 	await loadFloors(registry.scans_url, registry.floors);
 	drawMarkers();
-	updateSurveyCount();
+	if (SURVEY_MODE) updateSurveyCount();
 }
 
 // --------------------------------------------------------------------------
@@ -109,6 +126,11 @@ function showOnlyFloor(floorNumber) {
 	}
 }
 
+function showAllFloors() {
+	for (const cloud of Object.values(state.clouds)) cloud.visible = true;
+	for (const box of document.querySelectorAll("#floors input[type=checkbox]")) box.checked = true;
+}
+
 // --------------------------------------------------------------------------
 // Spaces and markers
 // --------------------------------------------------------------------------
@@ -125,8 +147,10 @@ function fillSpaces() {
 	select.addEventListener("change", () => select.value && selectSpace(Number(select.value)));
 }
 
+// Unsaved survey edits show only in survey mode; everyone else sees the
+// markers already written to spaces.json.
 function markerOf(space) {
-	return state.survey[space.space_id]?.marker ?? space.marker;
+	return (SURVEY_MODE ? state.survey[space.space_id]?.marker : null) ?? space.marker;
 }
 
 function drawMarkers() {
@@ -140,7 +164,7 @@ function drawMarkers() {
 			title: space.room ?? space.name,
 			description: describe(space),
 		});
-		a.addEventListener("click", () => selectSpace(space.space_id));
+		a.addEventListener("click", () => (SURVEY_MODE ? selectSpace : highlightMarker)(space.space_id));
 		viewer.scene.annotations.add(a);
 		state.annotations[space.space_id] = a;
 	}
@@ -191,16 +215,19 @@ $id("ask").addEventListener("submit", async (event) => {
 		pending.textContent = answer.response;
 		const room = state.spaces.find(s => s.space_id === answer.space);
 		const isFloor = answer.floor !== null && answer.floor !== undefined;
-		const about = isFloor
-			? (answer.floor === 0 ? "planta baja" : `piso ${answer.floor}`)
+		const about = answer.building ? "todo el edificio"
+			: isFloor ? (answer.floor === 0 ? "planta baja" : `piso ${answer.floor}`)
 			: (room?.room ?? room?.name ?? answer.space);
-		// No meta line when the API asked which room or floor: nothing was routed.
+		// No meta line when the API answered without routing (help, which
+		// room, unknown room).
 		if (about !== null && about !== undefined) {
-			appendSpan(pending, "meta", `${answer.intent_type} • ${about}`
+			const kind = INTENT_LABELS[answer.intent_type] ?? answer.intent_type;
+			appendSpan(pending, "meta", `${kind} • ${about}`
 				+ (answer.forecast_method ? ` • ${answer.forecast_method}, ${answer.horizon_min} min` : ""));
 		}
 		if (answer.warning) appendSpan(pending, "warning", answer.warning);
-		if (isFloor) showOnlyFloor(answer.floor);
+		if (answer.building) showAllFloors();
+		else if (isFloor) showOnlyFloor(answer.floor);
 		else if (room) highlightMarker(room.space_id);
 	} catch (e) {
 		pending.textContent = `Error al consultar la API: ${e.message}`;
@@ -255,61 +282,63 @@ function measureLength(m) {
 	return total;
 }
 
-$id("take-marker").addEventListener("click", () => {
-	const m = lastMeasure(1);
-	if (!m) return alert("Primero mide un punto con la herramienta de Potree.");
-	const v = m.points[m.points.length - 1].position;
-	$id("marker-value").textContent = [v.x, v.y, v.z].map(round).join(", ");
-	$id("marker-value").dataset.value = JSON.stringify([v.x, v.y, v.z].map(round));
-});
+function setupSurvey() {
+	$id("take-marker").addEventListener("click", () => {
+		const m = lastMeasure(1);
+		if (!m) return alert("Primero mide un punto con la herramienta de Potree.");
+		const v = m.points[m.points.length - 1].position;
+		$id("marker-value").textContent = [v.x, v.y, v.z].map(round).join(", ");
+		$id("marker-value").dataset.value = JSON.stringify([v.x, v.y, v.z].map(round));
+	});
 
-for (const button of document.querySelectorAll("#survey [data-dim]")) {
-	button.addEventListener("click", () => {
-		const m = lastMeasure(2);
-		if (!m) return alert("Primero mide una distancia con la herramienta de Potree.");
-		$id(`dim-${button.dataset.dim}`).value = round(measureLength(m));
+	for (const button of document.querySelectorAll("#survey [data-dim]")) {
+		button.addEventListener("click", () => {
+			const m = lastMeasure(2);
+			if (!m) return alert("Primero mide una distancia con la herramienta de Potree.");
+			$id(`dim-${button.dataset.dim}`).value = round(measureLength(m));
+		});
+	}
+
+	$id("save-space").addEventListener("click", () => {
+		const space = state.selected;
+		if (!space) return alert("Elige primero, en la lista de este panel, el salón que mediste.");
+		const marker = $id("marker-value").dataset.value;
+		const dims = ["length", "width", "height"].map(k => parseFloat($id(`dim-${k}`).value));
+		state.survey[space.space_id] = {
+			marker: marker ? JSON.parse(marker) : markerOf(space),
+			dimensions: dims.every(Number.isFinite)
+				? { length: dims[0], width: dims[1], height: dims[2] }
+				: (state.survey[space.space_id]?.dimensions ?? space.dimensions),
+		};
+		saveSurvey();
+		drawMarkers();
+		selectSpace(space.space_id);
+	});
+
+	function showSurveyFor(space) {
+		const saved = space ? (state.survey[space.space_id] ?? space) : {};
+		const marker = saved.marker;
+		$id("marker-value").textContent = marker ? marker.join(", ") : "—";
+		$id("marker-value").dataset.value = marker ? JSON.stringify(marker) : "";
+		for (const k of ["length", "width", "height"]) {
+			$id(`dim-${k}`).value = saved.dimensions?.[k] ?? "";
+		}
+	}
+
+	$id("download").addEventListener("click", async () => {
+		const registry = await (await fetch("/spaces/registry")).json();
+		for (const space of registry.spaces) {
+			const edit = state.survey[space.space_id];
+			if (edit) Object.assign(space, edit);
+		}
+		const blob = new Blob([JSON.stringify(registry, null, 2) + "\n"], { type: "application/json" });
+		const link = document.createElement("a");
+		link.href = URL.createObjectURL(blob);
+		link.download = "spaces.json";
+		link.click();
+		URL.revokeObjectURL(link.href);
 	});
 }
-
-$id("save-space").addEventListener("click", () => {
-	const space = state.selected;
-	if (!space) return alert("Elige primero, en la lista de este panel, el salón que mediste.");
-	const marker = $id("marker-value").dataset.value;
-	const dims = ["length", "width", "height"].map(k => parseFloat($id(`dim-${k}`).value));
-	state.survey[space.space_id] = {
-		marker: marker ? JSON.parse(marker) : markerOf(space),
-		dimensions: dims.every(Number.isFinite)
-			? { length: dims[0], width: dims[1], height: dims[2] }
-			: (state.survey[space.space_id]?.dimensions ?? space.dimensions),
-	};
-	saveSurvey();
-	drawMarkers();
-	selectSpace(space.space_id);
-});
-
-function showSurveyFor(space) {
-	const saved = space ? (state.survey[space.space_id] ?? space) : {};
-	const marker = saved.marker;
-	$id("marker-value").textContent = marker ? marker.join(", ") : "—";
-	$id("marker-value").dataset.value = marker ? JSON.stringify(marker) : "";
-	for (const k of ["length", "width", "height"]) {
-		$id(`dim-${k}`).value = saved.dimensions?.[k] ?? "";
-	}
-}
-
-$id("download").addEventListener("click", async () => {
-	const registry = await (await fetch("/spaces/registry")).json();
-	for (const space of registry.spaces) {
-		const edit = state.survey[space.space_id];
-		if (edit) Object.assign(space, edit);
-	}
-	const blob = new Blob([JSON.stringify(registry, null, 2) + "\n"], { type: "application/json" });
-	const link = document.createElement("a");
-	link.href = URL.createObjectURL(blob);
-	link.download = "spaces.json";
-	link.click();
-	URL.revokeObjectURL(link.href);
-});
 
 function updateSurveyCount() {
 	const n = Object.keys(state.survey).length;

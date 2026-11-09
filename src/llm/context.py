@@ -100,7 +100,7 @@ def build_prompt(intent: Intent, data: dict) -> tuple[str, str]:
     Returns:
         A tuple of (system prompt, user prompt).
     """
-    if data.get("floor") is not None:
+    if data.get("scope") in ("floor", "building"):
         return SYSTEM_PROMPT, _prompt_floor(intent, data)
 
     builders = {
@@ -304,27 +304,36 @@ def _prompt_anomaly(intent: Intent, data: dict) -> str:
     )
 
 
-def _prompt_floor(intent: Intent, data: dict) -> str:
-    """Describe a whole floor: a summary first, then each room.
+def _scope_names(data: dict) -> tuple[str, str]:
+    """Return the heading and the phrase that name a floor or the building."""
+    if data.get("scope") == "building":
+        return "EDIFICIO AULAS 3", "el edificio"
+    if data["floor"] == 0:
+        return "PLANTA BAJA (piso 0)", "la planta baja"
+    return f"PISO {data['floor']}", f"el piso {data['floor']}"
 
-    The summary (mean, lowest and highest room) comes computed from the API;
-    the model only reads it. Rooms are named by their room number, never by
-    id, so the answer cannot say "espacio 5".
+
+def _prompt_floor(intent: Intent, data: dict) -> str:
+    """Ask for the summary of a floor or of the building, and nothing else.
+
+    The model writes one or two sentences from a summary the API computed
+    (mean, lowest and highest room). The room-by-room detail is not its job:
+    floor_detail() writes it from the numbers and the API appends it. Asked
+    to write both, Llama ran out of tokens halfway through six rooms, called
+    632 ppm "alta" and listed rooms 3310 to 3334, which do not exist.
 
     Args:
         intent: The classified question.
-        data: Built by api._floor_data: "floor", "kind", "rooms", "summary",
-            "without_data", "n_spaces" and, by kind, "timestamp",
-            "horizon_min", "method", "warning", "since", "until", "errors".
+        data: Built by api._floor_data: "scope", "floor", "kind", "rooms",
+            "summary" and, by kind, "timestamp", "horizon_min", "method",
+            "warning", "since", "until".
 
     Returns:
         The user prompt.
     """
-    floor = data["floor"]
     rooms = data.get("rooms", [])
-    without = data.get("without_data", [])
-    floor_name = "PLANTA BAJA (piso 0)" if floor == 0 else f"PISO {floor}"
-    floor_phrase = "la planta baja" if floor == 0 else f"el piso {floor}"
+    floor_name, floor_phrase = _scope_names(data)
+    summary_of = "DEL EDIFICIO" if data.get("scope") == "building" else "DEL PISO"
     parts = [f"El usuario preguntó: «{intent.original_text}»", ""]
 
     if data.get("state") == "unavailable":
@@ -335,17 +344,11 @@ def _prompt_floor(intent: Intent, data: dict) -> str:
         ]
         return "\n".join(parts)
 
-    coverage = f"{floor_name}: {len(rooms)} de {data.get('n_spaces', '?')} espacios con datos."
-    if without:
-        coverage += f" Sin datos: {', '.join(without)}."
-    parts.append(coverage)
-
     if not rooms:
         parts += [
-            *[f"  {e}" for e in data.get("errors", [])],
+            f"{floor_name}: ningún espacio tiene datos para responder.",
             "",
-            "Ningún espacio de este piso tiene datos para responder. Dilo así, "
-            "sin inventar valores.",
+            "Dilo en una oración, sin inventar valores.",
         ]
         return "\n".join(parts)
 
@@ -360,23 +363,14 @@ def _prompt_floor(intent: Intent, data: dict) -> str:
             f"máximo {_value(s.get('max'))} en {s.get('max_room')}"
         )
 
+    parts.append(f"{floor_name}: {len(rooms)} espacios con datos.")
     if kind == "forecast":
         parts += [
             "",
-            f"RESUMEN DEL PISO, predicción del GRU a +{data.get('horizon_min', '?')} min "
+            f"RESUMEN {summary_of}, predicción del GRU a +{data.get('horizon_min', '?')} min "
             f"(método {data.get('method', '?')}):",
             *[summary_line(v, s) for v, s in summary.items()],
-            "",
-            f"DETALLE POR SALÓN (ahora → en {data.get('horizon_min', '?')} min):",
         ]
-        for room in rooms:
-            changes = ", ".join(
-                f"{v} {_value(room['current'].get(v))} → {_value(room['predicted'].get(v))} "
-                f"{UNIT_LABELS.get(v, '')}".rstrip()
-                + f" ({_trend(v, room['current'].get(v), room['predicted'].get(v))})"
-                for v in data.get("variables", [])
-            )
-            parts.append(f"  {room['room']}: {changes}")
         if data.get("warning"):
             parts += ["", f"ADVERTENCIA QUE DEBES TRANSMITIR: {data['warning']}"]
     elif kind == "history":
@@ -385,48 +379,99 @@ def _prompt_floor(intent: Intent, data: dict) -> str:
         s = summary.get(variable, {})
         parts += [
             "",
-            f"RESUMEN DEL PISO, historial de {variable} "
+            f"RESUMEN {summary_of}, historial de {variable} "
             f"({data.get('since', '?')} a {data.get('until', '?')}):",
             f"  máximo {_value(s.get('max'))} {unit} en {s.get('max_room')}; "
             f"mínimo {_value(s.get('min'))} {unit} en {s.get('min_room')}; "
             f"promedio de los salones {_value(s.get('mean'))} {unit}",
-            "",
-            "DETALLE POR SALÓN:",
         ]
-        for room in rooms:
-            r = room.get("summary", {})
-            parts.append(
-                f"  {room['room']}: máximo {_value(r.get('max'))}, mínimo "
-                f"{_value(r.get('min'))}, promedio {_value(r.get('promedio'))} {unit}".rstrip()
-            )
     else:
         parts += [
             "",
-            f"RESUMEN DEL PISO (lecturas actuales, {data.get('timestamp', 'hora desconocida')}):",
+            f"RESUMEN {summary_of} (lecturas actuales, {data.get('timestamp', 'hora desconocida')}):",
             *[summary_line(v, s) for v, s in summary.items()],
-            "",
-            "DETALLE POR SALÓN:",
         ]
         notes = []
         for room in rooms:
-            parts.append(f"  {room['room']}: {_compact(room['readings'])}")
-            room_notes = _threshold_notes(room["readings"])
-            if room_notes:
-                notes += [f"  {room['room']}: {line.strip()}" for line in room_notes.splitlines()]
-        if notes:
-            parts += ["", "REFERENCIA DE RANGOS:", *notes]
-
-    if data.get("errors"):
-        parts += ["", "SALONES SIN PREDICCIÓN:", *[f"  {e}" for e in data["errors"]]]
+            for line in _threshold_notes(room["readings"]).splitlines():
+                notes.append(f"  {room['room']}: {line.strip()}")
+        parts += ["", "FUERA DE RANGO:", *(notes or ["  ninguno"])]
 
     parts += [
         "",
-        "Responde en español usando solo estos datos. Primero resume el piso en "
-        "una oración (promedio y salones extremos); después dedica una oración "
-        "corta a cada salón. Para esta pregunta puedes pasar del límite de 3 "
-        "oraciones. Si hay espacios sin datos, menciónalo al final.",
+        f"Escribe SOLO el resumen de {floor_phrase}, en una o dos oraciones: el "
+        "promedio, los espacios extremos y, si los hay, los que están fuera de "
+        "rango. Usa únicamente los adjetivos de la sección FUERA DE RANGO. No "
+        "hagas una lista por salón ni menciones espacios sin datos: el detalle lo "
+        "agrega el sistema.",
     ]
     return "\n".join(parts)
+
+
+VARIABLE_NAMES = {
+    "co2": "CO₂",
+    "temperature": "temperatura",
+    "humidity": "humedad",
+    "light": "luz",
+    "motion": "movimiento",
+}
+
+
+def floor_detail(data: dict) -> str:
+    """Write the room-by-room detail of a floor or building answer.
+
+    Plain text built from the numbers, appended by the API after the
+    model's summary, so every room and value in it is exactly what was
+    retrieved. Ends with the rooms without data: named for a floor, counted
+    for the building, where the list would run to twenty.
+
+    Args:
+        data: Built by api._floor_data.
+
+    Returns:
+        The detail block, possibly empty.
+    """
+    if data.get("state") == "unavailable":
+        return ""
+    kind = data.get("kind")
+    variables = data.get("variables", [])
+    lines = []
+
+    def unit(v: str) -> str:
+        return "" if v == "motion" else UNIT_LABELS.get(v, "")
+
+    for room in data.get("rooms", []):
+        if kind == "forecast":
+            values = " · ".join(
+                f"{VARIABLE_NAMES.get(v, v)} {_value(room['current'].get(v))} → "
+                f"{_value(room['predicted'].get(v))} {unit(v)}".rstrip()
+                + f" ({_trend(v, room['current'].get(v), room['predicted'].get(v))})"
+                for v in variables
+            )
+        elif kind == "history":
+            v = variables[0] if variables else "co2"
+            r = room.get("summary", {})
+            values = (
+                f"{VARIABLE_NAMES.get(v, v)} máximo {_value(r.get('max'))}, mínimo "
+                f"{_value(r.get('min'))}, promedio {_value(r.get('promedio'))} {unit(v)}"
+            ).rstrip()
+        else:
+            values = " · ".join(
+                f"{VARIABLE_NAMES.get(v, v)} {_value(room['readings'].get(v))} {unit(v)}".rstrip()
+                for v in variables
+            )
+        lines.append(f"• {room['room']}: {values}")
+
+    for error in data.get("errors", []):
+        lines.append(f"• {error['room']}: sin pronóstico ({error['reason']})")
+
+    without = data.get("without_data", [])
+    if without and data.get("scope") == "building":
+        lines.append(f"Los otros {len(without)} espacios del edificio no tienen sensor.")
+    elif without:
+        _, phrase = _scope_names(data)
+        lines.append(f"Sin sensor en {phrase}: {', '.join(without)}.")
+    return "\n".join(lines)
 
 
 def _trend(variable: str, now: object, later: object) -> str:
