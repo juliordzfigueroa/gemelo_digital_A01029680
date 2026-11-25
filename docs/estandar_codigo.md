@@ -1,6 +1,7 @@
 # Estándar de código
 
-Convención para todos los archivos `.py` del proyecto. Comentarios, docstrings e
+Convención para todos los archivos `.py` del proyecto: cómo se documentan (encabezado,
+docstrings y comentarios) y cómo se mantienen simples. Comentarios, docstrings e
 identificadores en **inglés**: variables, funciones, clases, módulos, columnas
 de datos, opciones de línea de comandos y campos de la API. Lo que lee una
 persona se queda en **español**: mensajes en pantalla, prompts y respuestas del
@@ -111,3 +112,43 @@ investigación, se cita en el docstring, no en un comentario suelto. Dos formas:
 Anotaciones de tipo en toda firma pública. `from __future__ import annotations`
 al inicio del archivo para poder usar la sintaxis moderna (`list[str]`,
 `int | None`) sin depender de la versión de Python.
+
+## Simplicidad
+
+El código tiene que poder leerlo y explicarlo quien lo defiende. Cuando hay
+dos formas de escribir algo, gana la que se entiende a la primera.
+
+**Sin opciones que nadie usa.** Un modo, un interruptor o un argumento que no
+se usa se quita, aunque "pueda servir después". Si sirvió para medir algo, el
+resultado se escribe en el README del módulo y el código se va. Cada opción es
+un camino más que hay que leer, probar y mantener.
+
+**Cada regla en un solo lugar.** Si dos partes del código necesitan la misma
+regla (por ejemplo, qué ventanas son válidas), una la calcula y la otra la usa.
+Dos copias de la misma regla terminan diciendo cosas distintas.
+
+**Funciones cortas, archivos con una sola responsabilidad.** Como referencia,
+una función de más de unas 40 líneas o un archivo de más de unas 400 se parten.
+Un archivo de entrenamiento entrena; las pruebas van en otro.
+
+**Bucles claros antes que construcciones compactas.** Se prefiere un `for`
+con su comentario a una comprensión anidada, al operador `:=` o a
+desempaquetar diccionarios dentro de una comprensión.
+
+```python
+# Sí
+totals = {}
+for variable in variables:
+    totals[variable] = sum(values[variable])
+
+# No
+totals = {v: sum(x) for v, x in ((v, values[v]) for v in variables)}
+```
+
+**Un nombre por concepto.** Si la partición de prueba se llama `test` en el
+código, se llama `test` en los docstrings, en los mensajes y en los
+diccionarios. Los nombres de `Args` del docstring son exactamente los
+parámetros de la función.
+
+**Nada que apunte a algo que ya no existe.** Un mensaje que dice "corre
+`python -m modulo`" tiene que nombrar un comando que funcione hoy.
