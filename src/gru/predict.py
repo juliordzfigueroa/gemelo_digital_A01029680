@@ -29,7 +29,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Initial implementation.
+    2026-11-25 - Single recurrent implementation; fixed stale names.
 
 Reference:
     Sections 4.2.5 and 4.2.6 of the research document.
@@ -58,35 +58,6 @@ MAX_HORIZON_MIN = 120
 # Minutes per step, derived from the sampling interval rather than hard-coded
 # so that changing the interval in config.py cannot desynchronize this module.
 MINUTES_PER_STEP = cfg.INTERVAL_SECONDS // 60
-
-
-def _implementation_from_weights(state: dict) -> str:
-    """Infer which recurrent implementation a checkpoint was trained with.
-
-    The two implementations do not have the same parameters: the hand-written
-    cell stores three weight matrices per layer, while nn.GRU stores fused
-    input and hidden matrices plus two bias vectors per gate. Loading a
-    checkpoint into the wrong one fails with an unreadable state_dict error,
-    and older runs saved no `implementacion` field at all, so the weights
-    themselves are the only reliable source.
-
-    Args:
-        estado: State dict loaded from a .pt file.
-
-    Returns:
-        Either "cho" or "pytorch".
-
-    Raises:
-        RuntimeError: If the checkpoint matches neither layout.
-    """
-    if any(key.startswith("gru1.cell.") for key in state):
-        return "cho"
-    if "gru1.weight_ih_l0" in state:
-        return "pytorch"
-    raise RuntimeError(
-        "the checkpoint matches neither recurrent layout; its first keys are "
-        f"{list(state)[:4]}"
-    )
 
 
 def load_model(
@@ -121,7 +92,7 @@ def load_model(
         if not Path(path).exists():
             raise FileNotFoundError(
                 f"{path} does not exist; train the model first with "
-                "`python -m gru.entrenar`"
+                "`python -m gru.train`"
             )
 
     if device is None:
@@ -130,15 +101,12 @@ def load_model(
     metadata = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
     state = torch.load(weights_path, map_location=device)
 
-    # Derived from the weights even when the metadata states it: the weights
-    # are what has to load, and a metadata field can be stale or absent.
-    implementation = _implementation_from_weights(state)
-
     net = mod.build(
         n_spaces=len(metadata["space_index"]),
         n_continuous_features=len(metadata["feature_columns"]),
-        implementation=implementation,
     )
+    # A checkpoint from the removed nn.GRU variant has different parameter
+    # names and fails here; retrain it with `python -m gru.train`.
     net.load_state_dict(state)
     net.to(device)
     net.eval()
@@ -151,7 +119,7 @@ def space_index_of(metadata: dict, space_id: int) -> int:
     """Translate a space id into its row of the embedding table.
 
     Args:
-        metadatos: Metadata dict returned by load_model().
+        metadata: Metadata dict returned by load_model().
         space_id: Space identifier as it appears in the data.
 
     Returns:
@@ -180,7 +148,7 @@ def _check_layout(metadata: dict) -> list[str]:
     an error at load time.
 
     Args:
-        metadatos: Metadata dict returned by load_model().
+        metadata: Metadata dict returned by load_model().
 
     Returns:
         The names of the trailing time-feature columns, possibly empty.
@@ -205,11 +173,11 @@ def _time_features(stamps: pd.Series, names: list[str]) -> np.ndarray:
     never drift from training on how the time of day is encoded.
 
     Args:
-        marcas: Timestamps to encode.
-        nombres: Expected feature names, in order.
+        stamps: Timestamps to encode.
+        names: Expected feature names, in order.
 
     Returns:
-        An array shaped (len(marcas), len(nombres)).
+        An array shaped (len(stamps), len(names)).
     """
     if not names:
         return np.empty((len(stamps), 0), dtype=np.float32)
@@ -227,8 +195,8 @@ def _to_physical(
     """Convert a normalized block to physical units and clip it.
 
     Args:
-        normalizador: Fitted normalizer.
-        bloque: Normalized predictions shaped (pasos, n_variables).
+        normalizer: Fitted normalizer.
+        block: Normalized predictions shaped (steps, n_variables).
         variables: Variable names matching the last axis.
         space_id: Space the block belongs to.
 
@@ -260,8 +228,8 @@ def _to_normalized(
     of repeating the affine arithmetic, so the two can never disagree.
 
     Args:
-        normalizador: Fitted normalizer.
-        bloque: Values in physical units shaped (pasos, n_variables).
+        normalizer: Fitted normalizer.
+        block: Values in physical units shaped (steps, n_variables).
         variables: Variable names matching the last axis.
         space_id: Space the block belongs to.
 
@@ -282,10 +250,10 @@ def _normalized_window(
     """Turn a window of raw readings into the network's input array.
 
     Args:
-        ventana: Exactly INPUT_STEPS rows satisfying the data contract,
+        window: Exactly INPUT_STEPS rows satisfying the data contract,
             sorted by time, in physical units.
-        normalizador: Fitted normalizer.
-        metadatos: Metadata dict returned by load_model().
+        normalizer: Fitted normalizer.
+        metadata: Metadata dict returned by load_model().
         time_names: Trailing time-feature column names.
 
     Returns:
@@ -327,7 +295,7 @@ def _normalized_window(
 
 
 def last_contiguous_window(rows: pd.DataFrame, steps: int) -> pd.DataFrame | None:
-    """Find the most recent run of `pasos` consecutive readings.
+    """Find the most recent run of `steps` consecutive readings.
 
     Taking the last N rows is not enough. Readings arrive as missing rows when
     a node loses the network, so the last 12 rows can span a two-day hole and
@@ -335,8 +303,8 @@ def last_contiguous_window(rows: pd.DataFrame, steps: int) -> pd.DataFrame | Non
     complaint and forecast from a sequence that never happened.
 
     Args:
-        filas: Rows of one space, sorted by time.
-        pasos: How many consecutive readings are needed.
+        rows: Rows of one space, sorted by time.
+        steps: How many consecutive readings are needed.
 
     Returns:
         The last window whose steps are exactly one sampling interval apart,
@@ -374,10 +342,10 @@ def predict(
     """Forecast one space forward, choosing direct or iterative mode.
 
     Args:
-        red: Network returned by load_model().
-        normalizador: Normalizer returned by load_model().
-        metadatos: Metadata dict returned by load_model().
-        ventana: The last INPUT_STEPS readings of that space, in physical
+        net: Network returned by load_model().
+        normalizer: Normalizer returned by load_model().
+        metadata: Metadata dict returned by load_model().
+        window: The last INPUT_STEPS readings of that space, in physical
             units, with the timestamp column. The timestamps are what let the
             iterative mode know the real time of day of each predicted step.
         space_id: Space identifier as it appears in the data.
@@ -386,11 +354,11 @@ def predict(
 
     Returns:
         A dict with:
-          predicciones: one dict per 5-minute step, holding offset_min and one
+          predictions: one dict per 5-minute step, holding offset_min and one
             entry per variable in physical units.
           horizon_min: the horizon actually served.
-          metodo: "directo" or "iterativo".
-          advertencia: a sentence about compounded error, or None.
+          method: "directo" or "iterativo" (shown to the user, so in Spanish).
+          warning: a sentence about compounded error, or None.
 
     Raises:
         ValueError: If the horizon is out of range or not a multiple of the
@@ -398,12 +366,12 @@ def predict(
     """
     if horizon_min <= 0 or horizon_min > MAX_HORIZON_MIN:
         raise ValueError(
-            f"horizonte_min must be between {MINUTES_PER_STEP} and "
+            f"horizon_min must be between {MINUTES_PER_STEP} and "
             f"{MAX_HORIZON_MIN}, got {horizon_min}"
         )
     if horizon_min % MINUTES_PER_STEP != 0:
         raise ValueError(
-            f"horizonte_min must be a multiple of {MINUTES_PER_STEP}, "
+            f"horizon_min must be a multiple of {MINUTES_PER_STEP}, "
             f"got {horizon_min}"
         )
 
@@ -511,8 +479,7 @@ def main() -> int:
 
     net, normalizer, metadata = load_model()
     print(
-        f"Modelo cargado: implementacion {net.implementation}, "
-        f"{net.n_parameters():,} parametros, "
+        f"Modelo cargado: {net.n_parameters():,} parametros, "
         f"espacios {sorted(int(k) for k in metadata['space_index'])}"
     )
 

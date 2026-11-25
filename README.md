@@ -176,7 +176,7 @@ exportación de los sensores y el horario a `data/raw/`, y luego:
 ```powershell
 cd src
 python -m ingestion.cleaning "../data/raw/1 oct a 11 octubre 2026.csv"
-python -m gru.train --implementation pytorch
+python -m gru.train
 ```
 
 Deja tres archivos en `models/`: `gru.pt`, `gru_normalizer.json` y
@@ -373,7 +373,7 @@ la comparación interior contra exterior por salón. Necesita internet.
 ### 2. Que la red aprende
 
 ```powershell
-python -m gru.train --known-series-test --implementation pytorch
+python -m gru.check
 ```
 
 Entrena con una serie determinista, sin ruido ni huecos, cuya respuesta se
@@ -383,7 +383,7 @@ conocida.` Si falla, el problema está en el código, no en los datos.
 ### 3. Entrenar y medir
 
 ```powershell
-python -m gru.train --implementation pytorch
+python -m gru.train
 ```
 
 Imprime MAE, RMSE y R² por variable sobre el día de prueba —un día entre
@@ -666,19 +666,15 @@ Vale para las consolas que se abran después, no para la actual.
 ## Otros comandos
 
 ```powershell
-python -m gru.compare_implementations                  # celda a mano contra nn.GRU
 python -m llm.classifier                               # cómo se rutean las preguntas
-python -m llm.context                                   # los prompts por tipo
+python -m llm.context                                  # los prompts por tipo
 ```
 
 | Opción | Para qué |
 |---|---|
 | `--data ruta` | Otro archivo con el contrato de datos; por omisión `data/processed/aulas3.parquet` |
 | `--epochs N` / `--patience N` | Tope de épocas y épocas sin mejora antes de parar |
-| `--implementation pytorch` | `nn.GRU` en vez de la celda a mano |
-| `--normalize-by-space` | Media y sigma por espacio en vez de globales |
 | `--label nombre` | Prefijo de los archivos guardados |
-| `--seasonality seasonal` | SARIMAX con `s=288`. Inviable: 2,147 s por modelo |
 
 ---
 
@@ -698,7 +694,6 @@ python -m llm.context                                   # los prompts por tipo
 | `gru_loaded: false` en `/health` | Lo mismo: falta entrenar |
 | `No se puede conectar con Ollama` | Ollama no está instalado o no corre: `ollama serve` |
 | `Ollama no tiene el modelo` | `ollama pull llama3.1:8b` |
-| Tarda demasiado | Te faltó `--implementation pytorch` |
 | `/viewer/` da 404 | Falta la librería de Potree en `web/potree/` (Instalación, paso 4) |
 | "Ningún piso disponible" en el visor | `scans.server` no corre, o `SCANS_DIR` no apunta a las nubes |
 | Un piso dice "sin convertir" | No existe `D:\escaneos\A3-PN\metadata.json`: falta convertirlo |

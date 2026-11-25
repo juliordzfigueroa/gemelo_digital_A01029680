@@ -109,10 +109,7 @@ async def lifespan_handler(app: FastAPI):
     try:
         net, normalizer, metadata = pred.load_model()
         STATE.update(net=net, normalizer=normalizer, metadata=metadata)
-        print(
-            f"GRU cargado: implementacion {net.implementation}, "
-            f"{net.n_parameters():,} parametros"
-        )
+        print(f"GRU cargado: {net.n_parameters():,} parametros")
     except (FileNotFoundError, RuntimeError) as e:
         STATE["model_error"] = str(e)
         print(f"ADVERTENCIA: el GRU no se pudo cargar: {e}")
