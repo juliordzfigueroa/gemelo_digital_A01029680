@@ -236,8 +236,8 @@ def print_report(results: dict, title: str = "Metricas") -> None:
     """Print a metrics table, flagging the variables whose MAPE is unreliable.
 
     Args:
-        resultados: Output of evaluate().
-        titulo: Heading shown above the table.
+        results: Output of evaluate().
+        title: Heading shown above the table.
     """
     print(f"\n== {title} ==")
     header = (

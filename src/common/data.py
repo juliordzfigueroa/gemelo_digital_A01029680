@@ -49,7 +49,7 @@ def mark_blocks(df: pd.DataFrame) -> pd.DataFrame:
         df: Data contract frame, with timestamp and space columns.
 
     Returns:
-        The same rows plus a 'bloque_id' column.
+        The same rows plus a 'block_id' column.
     """
     step = pd.Timedelta(seconds=cfg.INTERVAL_SECONDS)
     tolerance = step * (cfg.MAX_INTERPOLABLE_STEPS + 1)
@@ -74,7 +74,7 @@ def regularize(df: pd.DataFrame) -> pd.DataFrame:
     so no meaningless intermediate value such as 0.5 is produced for a PIR.
 
     Args:
-        df: Frame already carrying a 'bloque_id' column.
+        df: Frame already carrying a 'block_id' column.
 
     Returns:
         Frame on a regular grid, with short gaps filled and long ones left as
@@ -485,8 +485,8 @@ def loaders(
     against time.
 
     Args:
-        conjuntos: Splits returned by prepare().
-        lote: Batch size.
+        datasets: Splits returned by prepare().
+        batch: Batch size.
 
     Returns:
         One DataLoader per split, under the same keys.
@@ -507,7 +507,7 @@ def load_data(path: Path | None = None) -> pd.DataFrame:
     """Load a frame that satisfies the data contract.
 
     Args:
-        ruta: A parquet or CSV file. Defaults to the cleaned sensor data
+        path: A parquet or CSV file. Defaults to the cleaned sensor data
             written by ingestion.cleaning.
 
     Returns:
@@ -521,7 +521,7 @@ def load_data(path: Path | None = None) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(
             f"{path} does not exist. Clean the raw exports first with "
-            "`python -m ingesta.limpieza ../data/raw/<archivo>.csv`"
+            "`python -m ingestion.cleaning ../data/raw/<archivo>.csv`"
         )
     if path.suffix == ".parquet":
         return pd.read_parquet(path)
