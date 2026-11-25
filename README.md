@@ -751,6 +751,7 @@ check_gpu.py      diagnóstico de CUDA
 | [src/gru/README.md](src/gru/README.md) | Decisiones de diseño del GRU y qué queda abierto |
 | [src/llm/README.md](src/llm/README.md) | La capa conversacional: qué se le puede preguntar, y el reparto de trabajo con el LLM |
 | [src/sarimax/README.md](src/sarimax/README.md) | El baseline, y por qué no `s=288` |
+| [docs/mapa_codigo.md](docs/mapa_codigo.md) | Guía para leer el código por partes: ideas, orden de lectura y preguntas para comprobar |
 | [docs/estandar_codigo.md](docs/estandar_codigo.md) | Convención de documentación del código |
 | [docs/estandar_commits.md](docs/estandar_commits.md) | Convención de mensajes de commit |
 | [docs/hallazgos_robod.md](docs/hallazgos_robod.md) | Evaluación descartada de ROBOD |
