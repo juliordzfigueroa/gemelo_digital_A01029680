@@ -38,6 +38,7 @@ from common import config as cfg
 from common import data as dat
 from common import metrics as met
 from gru import train as ent_gru
+from sarimax import model as mod_sarimax
 from sarimax import train as ent_sarimax
 
 
@@ -77,24 +78,12 @@ def run_sarimax(df) -> dict:
     Returns:
         A dict with the metrics, the horizon breakdown and the elapsed seconds.
     """
-    import time
-
-    preprocessed, _ = dat.preprocess(df.copy())
-    grids = ent_sarimax.grid_by_space(preprocessed)
-    origins = ent_sarimax.test_windows(preprocessed)
-    target = ent_sarimax.real_targets(grids, origins)
-
-    # Same guard as the standalone script: refuse to compare models that were
-    # not scored on identical windows.
-    ent_sarimax.check_against_gru(df.copy(), target)
-
-    t0 = time.time()
-    prediction, _ = ent_sarimax.fit_all(preprocessed, grids, origins)
+    output = ent_sarimax.run(df.copy())
     return {
-        "results": met.evaluate(target, prediction),
-        "horizon": met.by_horizon(target, prediction),
-        "seconds": time.time() - t0,
-        "detail": "SARIMAX (2, 0, 2) + Fourier K=4",
+        "results": output["results"],
+        "horizon": output["horizon"],
+        "seconds": output["seconds"],
+        "detail": f"SARIMAX {mod_sarimax.ORDER} + Fourier K={mod_sarimax.HARMONICS}",
     }
 
 

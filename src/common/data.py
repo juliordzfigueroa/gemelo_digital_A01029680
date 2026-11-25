@@ -322,6 +322,10 @@ class EnvironmentalWindows(Dataset):
 
     The third condition is what stops a test window from being fed by training
     steps.
+
+    The validity rule lives only here. SARIMAX builds this same class on the
+    frame in physical units and reads `origins`, so both models are scored on
+    the same windows by construction.
     """
 
     def __init__(
@@ -334,14 +338,20 @@ class EnvironmentalWindows(Dataset):
         """Materialize every valid window of one partition as tensors.
 
         Args:
-            df: Normalized frame carrying 'bloque_id' and 'particion'.
-            particion: Which partition to build, e.g. "entrenamiento".
+            df: Frame carrying 'block_id' and 'partition', normalized for the
+                GRU or in physical units for SARIMAX.
+            partition: Which partition to build: "train", "validation" or
+                "test".
             feature_columns: Input column names, in order.
             space_index: Mapping from space id to embedding index.
         """
         self.feature_columns = feature_columns
         self.variables = cfg.ACTIVE_VARIABLES
         self.space_index = space_index
+
+        # (space id, timestamp of the last input step) of every window, in the
+        # same order as the tensors.
+        self.origins: list[tuple[int, pd.Timestamp]] = []
 
         inputs, outputs, spaces = [], [], []
         length = cfg.INPUT_STEPS + cfg.OUTPUT_STEPS
@@ -356,6 +366,7 @@ class EnvironmentalWindows(Dataset):
             complete = ~np.isnan(features).any(axis=1) & ~np.isnan(target).any(axis=1)
             in_partition = (block["partition"] == partition).to_numpy()
             space = int(block[cfg.SPACE_COLUMN].iloc[0])
+            times = block[cfg.TIME_COLUMN].to_numpy()
 
             valid = complete & in_partition
             for start in range(len(block) - length + 1):
@@ -366,6 +377,7 @@ class EnvironmentalWindows(Dataset):
                 inputs.append(features[start:cutoff])
                 outputs.append(target[cutoff:end])
                 spaces.append(space_index[space])
+                self.origins.append((space, pd.Timestamp(times[cutoff - 1])))
 
         if inputs:
             self.X = torch.from_numpy(np.stack(inputs))
