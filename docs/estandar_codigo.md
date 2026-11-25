@@ -87,16 +87,16 @@ decisión entre alternativas, una restricción de la librería, un defecto
 conocido del sensor.
 
 ```python
-# Two separate nn.GRU modules instead of num_layers=2: PyTorch forces every
-# layer inside one nn.GRU to share hidden_size, and the spec asks for [128, 64].
-self.gru1 = nn.GRU(input_dim, 128, batch_first=True)
+# Non-training steps become NaN instead of being cut out: cutting would splice
+# distant days together and shift the phase of the Fourier terms.
+training = np.where(is_train, series, np.nan)
 ```
 
 No esto:
 
 ```python
-# Create the first GRU layer
-self.gru1 = nn.GRU(input_dim, 128, batch_first=True)
+# Replace the non-training values with NaN
+training = np.where(is_train, series, np.nan)
 ```
 
 ## Referencias
