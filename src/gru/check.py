@@ -56,8 +56,7 @@ def known_series(days: int = 20, n_spaces: int = 2) -> pd.DataFrame:
 
     parts = []
     for space in range(1, n_spaces + 1):
-        # CO2 approaches its target a little at every step: a first-order lag,
-        # the way a room fills up and empties.
+        # CO2 approaches its target a little at every step: a first-order lag, the way a room fills up and empties.
         target = 420 + 600 * (1 + 0.3 * (space - 1)) * occupancy
         co2 = np.empty_like(target)
         level = 420.0
