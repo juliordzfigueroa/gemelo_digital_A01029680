@@ -142,7 +142,6 @@ def predict(
 
 def train(
     df: pd.DataFrame,
-    by_space: bool = False,
     epochs: int = cfg.MAX_EPOCHS,
     patience: int = cfg.PATIENCE,
     quiet: bool = False,
@@ -152,7 +151,6 @@ def train(
 
     Args:
         df: Frame satisfying the data contract.
-        by_space: Whether to normalize per space instead of globally.
         epocas: Maximum number of epochs.
         paciencia: Epochs without validation improvement before stopping.
         silencioso: Suppress progress output.
@@ -169,9 +167,7 @@ def train(
     set_seed()
     dev = device()
 
-    datasets, normalizer, columns, space_index = dat.prepare(
-        df, by_space=by_space
-    )
+    datasets, normalizer, columns, space_index = dat.prepare(df)
     loaders = dat.loaders(datasets)
 
     if not quiet:
@@ -259,11 +255,9 @@ def train(
         )
 
     # Evaluate in physical units, never in z-score space.
-    real_n, pred_n, spaces = predict(net, loaders["test"], dev)
-    inverse = {v: k for k, v in space_index.items()}
-    ids = np.array([inverse[int(i)] for i in spaces])
-    real = normalizer.denormalize(real_n, cfg.ACTIVE_VARIABLES, ids)
-    pred = normalizer.denormalize(pred_n, cfg.ACTIVE_VARIABLES, ids)
+    real_n, pred_n, _ = predict(net, loaders["test"], dev)
+    real = normalizer.denormalize(real_n, cfg.ACTIVE_VARIABLES)
+    pred = normalizer.denormalize(pred_n, cfg.ACTIVE_VARIABLES)
 
     results = met.evaluate(real, pred)
     return {
@@ -416,11 +410,6 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=cfg.MAX_EPOCHS)
     parser.add_argument("--patience", type=int, default=cfg.PATIENCE)
     parser.add_argument(
-        "--normalize-by-space",
-        action="store_true",
-        help="fit mean and sigma per space instead of globally",
-    )
-    parser.add_argument(
         "--implementation",
         choices=("cho", "pytorch"),
         default=cfg.GRU_IMPLEMENTATION,
@@ -442,7 +431,6 @@ def main() -> int:
 
     output = train(
         df,
-        by_space=args.normalize_by_space,
         epochs=args.epochs,
         patience=args.patience,
         implementation=args.implementation,

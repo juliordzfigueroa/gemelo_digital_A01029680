@@ -68,13 +68,11 @@ def run_gru(df, implementation: str, epochs: int, patience: int) -> dict:
     }
 
 
-def run_sarimax(df, seasonality: str, order: tuple[int, int, int]) -> dict:
+def run_sarimax(df) -> dict:
     """Fit the SARIMAX baseline and return its test metrics.
 
     Args:
         df: Frame satisfying the data contract.
-        estacionalidad: "fourier" or "estacional".
-        orden: Non-seasonal (p, d, q).
 
     Returns:
         A dict with the metrics, the horizon breakdown and the elapsed seconds.
@@ -91,14 +89,12 @@ def run_sarimax(df, seasonality: str, order: tuple[int, int, int]) -> dict:
     ent_sarimax.check_against_gru(df.copy(), target)
 
     t0 = time.time()
-    prediction, _ = ent_sarimax.fit_all(
-        preprocessed, grids, origins, seasonality, order
-    )
+    prediction, _ = ent_sarimax.fit_all(preprocessed, grids, origins)
     return {
         "results": met.evaluate(target, prediction),
         "horizon": met.by_horizon(target, prediction),
         "seconds": time.time() - t0,
-        "detail": f"SARIMAX {order}, estacionalidad {seasonality}",
+        "detail": "SARIMAX (2, 0, 2) + Fourier K=4",
     }
 
 
@@ -159,13 +155,8 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--patience", type=int, default=8)
     parser.add_argument("--implementation", choices=("cho", "pytorch"), default="pytorch")
-    parser.add_argument(
-        "--seasonality", choices=("fourier", "seasonal"), default="fourier"
-    )
-    parser.add_argument("--order", default="2,0,2")
     args = parser.parse_args()
 
-    order = tuple(int(x) for x in args.order.split(","))
     df = dat.load_data(args.data)
     print(f"Datos: {len(df):,} filas, espacios {sorted(df[cfg.SPACE_COLUMN].unique())}")
 
@@ -174,7 +165,7 @@ def main() -> int:
     print(f"  listo en {gru['seconds']:.1f} s")
 
     print("\n== Ajustando SARIMAX ==")
-    sarimax = run_sarimax(df, args.seasonality, order)
+    sarimax = run_sarimax(df)
 
     print_comparison(gru, sarimax)
 

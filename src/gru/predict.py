@@ -236,8 +236,7 @@ def _to_physical(
         An array of the same shape in physical units, within the instrument
         range declared in config.PHYSICAL_LIMITS.
     """
-    spaces = np.array([space_id]) if normalizer.by_space else None
-    physical = normalizer.denormalize(block[None, :, :], variables, spaces)[0]
+    physical = normalizer.denormalize(block[None, :, :], variables)[0]
 
     for i, variable in enumerate(variables):
         lower, upper = cfg.PHYSICAL_LIMITS.get(variable, (None, None))

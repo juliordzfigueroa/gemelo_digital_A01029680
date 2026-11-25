@@ -12,8 +12,6 @@ not.
 
 Usage, from the src/ directory:
     python -m sarimax.train
-    python -m sarimax.train --days 60 --seasonality seasonal
-    python -m sarimax.train --paso 10        # subsample test windows
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
@@ -144,11 +142,7 @@ def check_against_gru(raw_df: pd.DataFrame, target: np.ndarray) -> None:
     """
     datasets, normalizer, _, space_index = dat.prepare(raw_df)
     test = datasets["test"]
-    inverse = {v: k for k, v in space_index.items()}
-    ids = np.array([inverse[int(i)] for i in test.space.numpy()])
-    gru_target = normalizer.denormalize(
-        test.y.numpy(), cfg.ACTIVE_VARIABLES, ids
-    )
+    gru_target = normalizer.denormalize(test.y.numpy(), cfg.ACTIVE_VARIABLES)
 
     if gru_target.shape != target.shape:
         raise RuntimeError(
@@ -169,8 +163,6 @@ def fit_all(
     df: pd.DataFrame,
     grids: dict[int, pd.DataFrame],
     origins: dict[int, list[pd.Timestamp]],
-    seasonality: str,
-    order: tuple[int, int, int],
 ) -> tuple[np.ndarray, dict]:
     """Fit one model per space and variable and forecast every test window.
 
@@ -178,8 +170,6 @@ def fit_all(
         df: Frame returned by common.data.preprocesar().
         rejillas: Output of grid_by_space().
         origenes: Output of test_windows().
-        estacionalidad: "fourier" or "estacional".
-        orden: Non-seasonal (p, d, q).
 
     Returns:
         A tuple of (predictions shaped like the targets, per-model diagnostics).
@@ -205,9 +195,7 @@ def fit_all(
             training = np.where(is_train, series, np.nan)
 
             t0 = time.time()
-            baseline = mod.BaselineSARIMAX(
-                order=order, seasonality=seasonality
-            ).fit(training)
+            baseline = mod.BaselineSARIMAX().fit(training)
 
             position = {t: i for i, t in enumerate(grid.index)}
             indices = np.array([position[t] for t in origins[space]])
@@ -217,14 +205,13 @@ def fit_all(
 
             key = f"{variable}@space{space}"
             diagnostics[key] = {
-                "order": baseline.order_summary(),
                 "aic": baseline.aic,
                 "n_train": int(is_train.sum()),
                 "seconds": round(time.time() - t0, 2),
             }
             print(
-                f"    {key:28} {baseline.order_summary():22} "
-                f"AIC {baseline.aic:10.1f}  {diagnostics[key]['seconds']:6.2f} s"
+                f"    {key:28} AIC {baseline.aic:10.1f}  "
+                f"{diagnostics[key]['seconds']:6.2f} s"
             )
     return prediction, diagnostics
 
@@ -239,20 +226,8 @@ def main() -> int:
     parser.add_argument(
         "--data", default=None, help="contract frame; defaults to the cleaned sensor data"
     )
-    parser.add_argument(
-        "--seasonality",
-        choices=("fourier", "seasonal"),
-        default="fourier",
-        help="'fourier' carries the daily cycle as exogenous regressors; "
-        "'estacional' uses s=288 as section 4.2.7.1 states, and is far slower",
-    )
-    parser.add_argument("--order", default="2,0,2", help="non-seasonal p,d,q")
     parser.add_argument("--label", default="sarimax")
     args = parser.parse_args()
-
-    order = tuple(int(x) for x in args.order.split(","))
-    if len(order) != 3:
-        raise SystemExit(f"--orden needs three values, got {args.order!r}")
 
     raw_df = dat.load_data(args.data)
 
@@ -261,7 +236,7 @@ def main() -> int:
     origins = test_windows(df)
     target = real_targets(grids, origins)
 
-    print(f"\nEstacionalidad: {args.seasonality} | orden no estacional: {order}")
+    print(f"\nOrden {mod.ORDER} + Fourier K={mod.HARMONICS}")
     print(f"Modelos a ajustar: {len(cfg.ACTIVE_VARIABLES)} variables x "
           f"{len(origins)} espacios = "
           f"{len(cfg.ACTIVE_VARIABLES) * len(origins)}")
@@ -269,22 +244,20 @@ def main() -> int:
 
     print("\n  Ajustando:")
     t0 = time.time()
-    prediction, diagnostics = fit_all(
-        df, grids, origins, args.seasonality, order
-    )
+    prediction, diagnostics = fit_all(df, grids, origins)
     duration = time.time() - t0
     print(f"\n  Total: {duration:.1f} s")
 
     results = met.evaluate(target, prediction)
-    met.print_report(results, f"SARIMAX ({args.seasonality}) sobre el conjunto de prueba")
+    met.print_report(results, "SARIMAX sobre el conjunto de prueba")
 
     cfg.MODELS.mkdir(parents=True, exist_ok=True)
     path = cfg.MODELS / f"{args.label}_metadata.json"
     path.write_text(
         json.dumps(
             {
-                "seasonality": args.seasonality,
-                "order": list(order),
+                "order": list(mod.ORDER),
+                "harmonics": mod.HARMONICS,
                 "n_windows": int(len(target)),
                 "seconds": round(duration, 1),
                 "test_metrics": results,

@@ -71,16 +71,14 @@ TIMEZONE = "America/Mexico_City"
 SEED = 42
 
 # --- Data contract ---------------------------------------------------------
-# Every data source (synthetic now, Aulas 3 sensors later) must provide a
-# DataFrame with these columns. Nothing downstream knows where the rows
-# came from, which is what lets the pipeline survive the switch.
+# Every data source (the cleaned sensor file today, the Tec database later)
+# must provide a DataFrame with these columns. Nothing downstream knows where
+# the rows came from, which is what lets the pipeline survive the switch.
 TIME_COLUMN = "timestamp"
 SPACE_COLUMN = "space_id"
 
-VARIABLES = ["co2", "temperature", "humidity", "light", "motion"]
-
 # Variables the model reads and predicts. Narrowing this list to
-# ["co2", "temperatura", "humedad"] reproduces the Sabiri (2025) setup.
+# ["co2", "temperature", "humidity"] reproduces the Sabiri (2025) setup.
 ACTIVE_VARIABLES = ["co2", "temperature", "humidity", "light", "motion"]
 
 # Physical units, used only to print metrics in readable form.
@@ -109,11 +107,6 @@ PHYSICAL_LIMITS = {
 #
 # Reference: docs/hallazgos_robod.md
 BINARY = {"motion"}
-
-# Variables whose minimum is a calibration floor rather than a real
-# measurement. The lower tail is censored, so a -3 sigma threshold can never
-# fire for them.
-LOWER_CENSORED = {"co2": 400.0}
 
 # --- Time windows ----------------------------------------------------------
 INTERVAL_SECONDS = 300  # data aggregated to 5-minute buckets
@@ -146,11 +139,6 @@ GRU_IMPLEMENTATION = "cho"
 # rooms, the embedding does not.
 SPACE_EMBEDDING_DIM = 8
 
-# Whether to append cyclical time features to the input. Sine and cosine of the
-# time of day avoid the artificial jump from 23:55 to 00:00 that an integer
-# hour would introduce.
-USE_TIME_FEATURES = True
-
 # --- Training --------------------------------------------------------------
 LEARNING_RATE = 1e-3  # Adam, standard value for recurrent networks
 BATCH_SIZE = 32
@@ -158,16 +146,10 @@ MAX_EPOCHS = 200
 PATIENCE = 15  # epochs without validation improvement before stopping
 MIN_IMPROVEMENT = 1e-5  # smallest validation gain that counts as an improvement
 
-# Chronological split, not random. A random split would leave step t in train
-# and step t+1 in test, so the model would be scored against data nearly
-# identical to what it saw: the result looks excellent and means nothing.
-TRAIN_FRACTION = 0.70
-VALIDATION_FRACTION = 0.15
-# The remaining 0.15 is the test split.
-
-# "by_days" assigns whole calendar days, with validation and test drawn from
-# the latest weekdays; "chronological" cuts each space's series at fixed
-# fractions. With one week of data the chronological cut leaves Saturday and
+# Share of calendar days for each split; the remaining 0.15 is the test split.
+# Validation and test take whole weekdays, the latest ones, and weekends stay
+# in training: a plain chronological cut over one week left Saturday and
 # Sunday at the end, so 96% of validation and test fell on an empty building.
 # Reference: Bergmeir, Hyndman & Koo (2018), doi:10.1016/j.csda.2017.11.003.
-PARTITION_MODE = "by_days"
+TRAIN_FRACTION = 0.70
+VALIDATION_FRACTION = 0.15
