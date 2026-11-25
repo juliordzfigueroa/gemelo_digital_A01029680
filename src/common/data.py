@@ -49,7 +49,7 @@ def mark_blocks(df: pd.DataFrame) -> pd.DataFrame:
         df: Data contract frame, with timestamp and space columns.
 
     Returns:
-        The same rows plus a 'bloque_id' column.
+        The same rows plus a 'block_id' column.
     """
     step = pd.Timedelta(seconds=cfg.INTERVAL_SECONDS)
     tolerance = step * (cfg.MAX_INTERPOLABLE_STEPS + 1)
@@ -74,7 +74,7 @@ def regularize(df: pd.DataFrame) -> pd.DataFrame:
     so no meaningless intermediate value such as 0.5 is produced for a PIR.
 
     Args:
-        df: Frame already carrying a 'bloque_id' column.
+        df: Frame already carrying a 'block_id' column.
 
     Returns:
         Frame on a regular grid, with short gaps filled and long ones left as
@@ -135,37 +135,6 @@ def add_time_features(df: pd.DataFrame) -> list[str]:
 # --------------------------------------------------------------------------
 # Chronological split
 # --------------------------------------------------------------------------
-def split(df: pd.DataFrame) -> pd.DataFrame:
-    """Tag every row as train, validation or test by time.
-
-    Cuts run along each space's time axis, never at random. A random split
-    would leave step t in training and step t+1 in test, scoring the model
-    against data practically identical to what it already saw: the result
-    looks excellent and means nothing.
-
-    Args:
-        df: Frame on a regular grid.
-
-    Returns:
-        The same rows plus a 'particion' column.
-    """
-    if cfg.PARTITION_MODE == "by_days":
-        return split_by_days(df)
-
-    parts = []
-    for _, group in df.groupby(cfg.SPACE_COLUMN, sort=True):
-        group = group.sort_values(cfg.TIME_COLUMN).copy()
-        n = len(group)
-        train_end = int(n * cfg.TRAIN_FRACTION)
-        val_end = int(n * (cfg.TRAIN_FRACTION + cfg.VALIDATION_FRACTION))
-        partition = np.array(["test"] * n, dtype=object)
-        partition[:train_end] = "train"
-        partition[train_end:val_end] = "validation"
-        group["partition"] = partition
-        parts.append(group)
-    return pd.concat(parts, ignore_index=True)
-
-
 def choose_days(dates: list) -> dict:
     """Decide which calendar days go to validation and test.
 
@@ -185,10 +154,10 @@ def choose_days(dates: list) -> dict:
     is when the building is empty.
 
     Args:
-        fechas: Calendar days present in the data.
+        dates: Calendar days present in the data.
 
     Returns:
-        A dict from each day to "entrenamiento", "validacion" or "prueba".
+        A dict from each day to "train", "validation" or "test".
 
     Reference:
         Bergmeir, C., Hyndman, R. J., & Koo, B. (2018). A note on the validity
@@ -209,17 +178,20 @@ def choose_days(dates: list) -> dict:
     }
 
 
-def split_by_days(df: pd.DataFrame) -> pd.DataFrame:
-    """Tag every row by the calendar day it belongs to.
+def split(df: pd.DataFrame) -> pd.DataFrame:
+    """Tag every row as train, validation or test by the day it belongs to.
 
-    The same days are used for every space, so all spaces are tested on the
-    same period and the GRU and SARIMAX see identical splits.
+    Whole calendar days, never random rows: a random split would leave step t
+    in training and step t+1 in test, scoring the model against data nearly
+    identical to what it already saw. The same days are used for every space,
+    so all spaces are tested on the same period and the GRU and SARIMAX see
+    identical splits.
 
     Args:
         df: Frame on a regular grid.
 
     Returns:
-        The same rows plus a 'particion' column.
+        The same rows plus a 'partition' column.
     """
     output = df.copy()
     day = output[cfg.TIME_COLUMN].dt.normalize()
@@ -236,53 +208,27 @@ class Normalizer:
 
     The variables live on wildly different scales (CO2 in hundreds of ppm,
     movement in 0/1), and without normalization the network would weight the
-    large-magnitude ones out of proportion.
+    large-magnitude ones out of proportion. One mean and one sigma per
+    variable for the whole building, as the research document specifies.
 
-    Two explicit decisions:
-
-      - Binary variables are NOT normalized. Applying (x - 0.4) / 0.49 to
-        something that only takes 0 or 1 improves nothing and makes the output
-        unreadable.
-      - `by_space` chooses between global per-variable statistics, as the
-        research document specifies, and per-space statistics. With light
-        levels differing by two orders of magnitude between spaces, global
-        statistics collapse the dark spaces near zero. The default follows the
-        document; this is a parameter, not a decision buried in the code.
+    Binary variables are NOT normalized: applying (x - 0.4) / 0.49 to something
+    that only takes 0 or 1 improves nothing and makes the output unreadable.
 
     Reference:
         Section 4.2.6 of the research document.
     """
 
-    def __init__(self, by_space: bool = False) -> None:
-        """Create an unfitted normalizer.
-
-        Args:
-            by_space: If True, fit one mean and sigma per space and
-                variable instead of one per variable.
-        """
-        self.by_space = by_space
+    def __init__(self) -> None:
+        """Create an unfitted normalizer."""
         self.parameters: dict[str, dict[str, float]] = {}
 
-    @staticmethod
-    def _key(variable: str, space: int | None) -> str:
-        """Build the lookup key for a variable, optionally scoped to a space.
-
-        Args:
-            variable: Variable name.
-            espacio: Space id, or None for global statistics.
-
-        Returns:
-            The dictionary key under which the statistics are stored.
-        """
-        return variable if space is None else f"{variable}@{space}"
-
     def fit(self, training: pd.DataFrame) -> "Normalizer":
-        """Compute mean and sigma from the training split.
+        """Compute mean and sigma of each variable from the training split.
 
         Args:
-            entrenamiento: Rows belonging to the training partition only.
-                Passing the full frame here would leak the future into
-                preprocessing and inflate every metric.
+            training: Rows belonging to the training partition only. Passing
+                the full frame here would leak the future into preprocessing
+                and inflate every metric.
 
         Returns:
             This normalizer, so calls can be chained.
@@ -290,32 +236,16 @@ class Normalizer:
         for variable in cfg.ACTIVE_VARIABLES:
             if variable in cfg.BINARY:
                 continue
-            if self.by_space:
-                for space, group in training.groupby(cfg.SPACE_COLUMN):
-                    self._fit_one(variable, group[variable], space)
-            else:
-                self._fit_one(variable, training[variable], None)
+            values = training[variable].dropna()
+            sigma = float(values.std())
+            # A variable that is constant in training would give sigma 0 and a
+            # division by zero. Falling back to 1 turns normalization into a
+            # plain shift, which is the harmless behaviour.
+            self.parameters[variable] = {
+                "mean": float(values.mean()),
+                "sigma": sigma if sigma > 1e-8 else 1.0,
+            }
         return self
-
-    def _fit_one(
-        self, variable: str, series: pd.Series, space: int | None
-    ) -> None:
-        """Store mean and sigma for one variable, optionally per space.
-
-        Args:
-            variable: Variable name.
-            serie: Training values for that variable.
-            espacio: Space id, or None for global statistics.
-        """
-        values = series.dropna()
-        sigma = float(values.std())
-        # A variable that is constant in training would give sigma 0 and a
-        # division by zero. Falling back to 1 turns normalization into a plain
-        # shift, which is the harmless behaviour.
-        self.parameters[self._key(variable, space)] = {
-            "mean": float(values.mean()),
-            "sigma": sigma if sigma > 1e-8 else 1.0,
-        }
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply the fitted z-score to a frame.
@@ -327,53 +257,24 @@ class Normalizer:
             A copy with the continuous variables normalized.
         """
         output = df.copy()
-        for variable in cfg.ACTIVE_VARIABLES:
-            if variable in cfg.BINARY:
-                continue
-            if self.by_space:
-                for space in output[cfg.SPACE_COLUMN].unique():
-                    p = self.parameters[self._key(variable, int(space))]
-                    rows = output[cfg.SPACE_COLUMN] == space
-                    output.loc[rows, variable] = (
-                        output.loc[rows, variable] - p["mean"]
-                    ) / p["sigma"]
-            else:
-                p = self.parameters[self._key(variable, None)]
-                output[variable] = (output[variable] - p["mean"]) / p["sigma"]
+        for variable, p in self.parameters.items():
+            output[variable] = (output[variable] - p["mean"]) / p["sigma"]
         return output
 
-    def denormalize(
-        self,
-        values: np.ndarray,
-        variables: list[str],
-        spaces: np.ndarray | None = None,
-    ) -> np.ndarray:
+    def denormalize(self, values: np.ndarray, variables: list[str]) -> np.ndarray:
         """Return values to their original physical units.
 
         Args:
-            valores: Array shaped (n, pasos, n_variables) in normalized space.
+            values: Array shaped (n, steps, n_variables) in normalized space.
             variables: Variable names in the order of the last axis.
-            espacios: Space ids shaped (n,). Required when by_space is True.
 
         Returns:
             An array of the same shape, in the original units.
-
-        Raises:
-            ValueError: If by_space is True and espacios is None.
         """
         output = np.asarray(values, dtype=float).copy()
         for i, variable in enumerate(variables):
-            if variable in cfg.BINARY:
-                continue
-            if self.by_space:
-                if spaces is None:
-                    raise ValueError("por_espacio=True requires the space ids")
-                for space in np.unique(spaces):
-                    p = self.parameters[self._key(variable, int(space))]
-                    rows = spaces == space
-                    output[rows, :, i] = output[rows, :, i] * p["sigma"] + p["mean"]
-            else:
-                p = self.parameters[self._key(variable, None)]
+            if variable in self.parameters:
+                p = self.parameters[variable]
                 output[:, :, i] = output[:, :, i] * p["sigma"] + p["mean"]
         return output
 
@@ -385,14 +286,10 @@ class Normalizer:
         degrees.
 
         Args:
-            ruta: Destination path.
+            path: Destination path.
         """
         path.write_text(
-            json.dumps(
-                {"by_space": self.by_space, "parameters": self.parameters},
-                indent=2,
-                ensure_ascii=False,
-            ),
+            json.dumps({"parameters": self.parameters}, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 
@@ -401,15 +298,15 @@ class Normalizer:
         """Rebuild a normalizer from a saved JSON file.
 
         Args:
-            ruta: Path written by save().
+            path: Path written by save().
 
         Returns:
             A fitted Normalizer.
         """
         data = json.loads(path.read_text(encoding="utf-8"))
-        norm = cls(by_space=data["by_space"])
-        norm.parameters = data["parameters"]
-        return norm
+        normalizer = cls()
+        normalizer.parameters = data["parameters"]
+        return normalizer
 
 
 # --------------------------------------------------------------------------
@@ -425,6 +322,10 @@ class EnvironmentalWindows(Dataset):
 
     The third condition is what stops a test window from being fed by training
     steps.
+
+    The validity rule lives only here. SARIMAX builds this same class on the
+    frame in physical units and reads `origins`, so both models are scored on
+    the same windows by construction.
     """
 
     def __init__(
@@ -437,14 +338,20 @@ class EnvironmentalWindows(Dataset):
         """Materialize every valid window of one partition as tensors.
 
         Args:
-            df: Normalized frame carrying 'bloque_id' and 'particion'.
-            particion: Which partition to build, e.g. "entrenamiento".
+            df: Frame carrying 'block_id' and 'partition', normalized for the
+                GRU or in physical units for SARIMAX.
+            partition: Which partition to build: "train", "validation" or
+                "test".
             feature_columns: Input column names, in order.
             space_index: Mapping from space id to embedding index.
         """
         self.feature_columns = feature_columns
         self.variables = cfg.ACTIVE_VARIABLES
         self.space_index = space_index
+
+        # (space id, timestamp of the last input step) of every window, in the
+        # same order as the tensors.
+        self.origins: list[tuple[int, pd.Timestamp]] = []
 
         inputs, outputs, spaces = [], [], []
         length = cfg.INPUT_STEPS + cfg.OUTPUT_STEPS
@@ -459,6 +366,7 @@ class EnvironmentalWindows(Dataset):
             complete = ~np.isnan(features).any(axis=1) & ~np.isnan(target).any(axis=1)
             in_partition = (block["partition"] == partition).to_numpy()
             space = int(block[cfg.SPACE_COLUMN].iloc[0])
+            times = block[cfg.TIME_COLUMN].to_numpy()
 
             valid = complete & in_partition
             for start in range(len(block) - length + 1):
@@ -469,6 +377,7 @@ class EnvironmentalWindows(Dataset):
                 inputs.append(features[start:cutoff])
                 outputs.append(target[cutoff:end])
                 spaces.append(space_index[space])
+                self.origins.append((space, pd.Timestamp(times[cutoff - 1])))
 
         if inputs:
             self.X = torch.from_numpy(np.stack(inputs))
@@ -527,32 +436,30 @@ def preprocess(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
     df = mark_blocks(df)
     df = regularize(df)
-    df = mark_blocks(df)  # the grid may have renumbered things; relabel
     df = split(df)
 
-    time_columns = add_time_features(df) if cfg.USE_TIME_FEATURES else []
+    time_columns = add_time_features(df)
     return df, list(cfg.ACTIVE_VARIABLES) + time_columns
 
 
 def prepare(
-    df: pd.DataFrame, by_space: bool = False
+    df: pd.DataFrame,
 ) -> tuple[dict[str, EnvironmentalWindows], Normalizer, list[str], dict[int, int]]:
     """Run the whole pipeline, from the data contract to the three splits.
 
     Args:
         df: Frame satisfying the data contract described in config.py.
-        by_space: Whether to normalize per space instead of globally.
 
     Returns:
         A tuple of (splits, normalizer, feature column names, space index map).
-        `splits` is keyed by "entrenamiento", "validacion" and "prueba".
+        `splits` is keyed by "train", "validation" and "test".
 
     Raises:
         ValueError: If the frame does not satisfy the data contract.
     """
     df, feature_columns = preprocess(df)
 
-    normalizer = Normalizer(by_space=by_space)
+    normalizer = Normalizer()
     normalizer.fit(df[df["partition"] == "train"])
     df = normalizer.transform(df)
 
@@ -578,8 +485,8 @@ def loaders(
     against time.
 
     Args:
-        conjuntos: Splits returned by prepare().
-        lote: Batch size.
+        datasets: Splits returned by prepare().
+        batch: Batch size.
 
     Returns:
         One DataLoader per split, under the same keys.
@@ -600,7 +507,7 @@ def load_data(path: Path | None = None) -> pd.DataFrame:
     """Load a frame that satisfies the data contract.
 
     Args:
-        ruta: A parquet or CSV file. Defaults to the cleaned sensor data
+        path: A parquet or CSV file. Defaults to the cleaned sensor data
             written by ingestion.cleaning.
 
     Returns:
@@ -614,7 +521,7 @@ def load_data(path: Path | None = None) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(
             f"{path} does not exist. Clean the raw exports first with "
-            "`python -m ingesta.limpieza ../data/raw/<archivo>.csv`"
+            "`python -m ingestion.cleaning ../data/raw/<archivo>.csv`"
         )
     if path.suffix == ".parquet":
         return pd.read_parquet(path)

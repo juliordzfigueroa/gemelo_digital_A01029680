@@ -8,49 +8,30 @@ adelante, a partir de 1 hora de contexto.
 
 | Archivo | Qué hace |
 |---|---|
-| `config.py` | Mapeo de variables, cotas físicas de los sensores, hiperparámetros. **Sin medias ni sigmas**: todo parámetro derivado de datos se calcula y se guarda aparte. |
-| `synthetic.py` | Genera datos de prueba que cumplen el contrato, con los mismos defectos esperados de los sensores reales. |
-| `data.py` | Bloques contiguos, rejilla regular, partición temporal, normalización y ventanas. |
-| `model.py` | La arquitectura, con las dos implementaciones recurrentes. |
-| `metrics.py` | MAE, RMSE, MAPE, sMAPE, R², por variable y por horizonte. |
-| `train.py` | Loop de entrenamiento con early stopping, evaluación y guardado. |
-| `compare_implementations.py` | Entrena las dos celdas recurrentes con la misma semilla y compara. |
+| `model.py` | La arquitectura. La celda recurrente (`GRUCell`) son las ecuaciones 1 a 4 de la sección 4.2.7.2 escritas literalmente. |
+| `train.py` | Entrenamiento con early stopping, evaluación sobre el día de prueba y guardado en `models/`. |
+| `predict.py` | Pronóstico de un salón desde sus últimas lecturas: directo (30 min) o iterativo (hasta 2 h). Lo usa la API. |
+| `check.py` | Prueba con una serie conocida: si la red no la aprende, el error está en el código. |
+
+Lo que comparte con SARIMAX vive en `src/common/`: el contrato de datos
+(`config.py`), la preparación y las ventanas (`data.py`) y las métricas
+(`metrics.py`).
 
 ## Cómo correrlo
 
+Desde `src/`:
+
 ```bash
-cd src/gru
-python train.py --known-series-test                        # verificación
-python train.py --days 60                                 # entrenamiento
-python train.py --implementation pytorch --days 60        # versión rápida
-python train.py --data ../../data/raw/aulas3.parquet     # datos reales
-python compare_implementations.py                          # cho vs pytorch
+python -m gru.check                          # ¿la red aprende?
+python -m gru.train                          # entrena y evalúa (~1 min)
+python -m gru.predict --space 308 --horizon 60
 ```
-
-## El contrato de datos
-
-El pipeline no sabe de dónde salen los datos. Cualquier fuente debe entregar un
-DataFrame con estas columnas:
-
-| Columna | Tipo | Nota |
-|---|---|---|
-| `timestamp` | datetime | hora local, intervalos de 5 min |
-| `space_id` | int | identificador del espacio |
-| `co2` | float | ppm |
-| `temperature` | float | °C |
-| `humidity` | float | %RH |
-| `light` | float | lux |
-| `motion` | float | 0 o 1 |
-
-Los huecos se expresan como **filas ausentes**, no como NaN: es lo que pasa de
-verdad cuando un nodo pierde la red. El día que existan los datos de Aulas 3,
-lo único que cambia es `--data`.
 
 ## Arquitectura
 
 ```
 entrada   (lote, 12, 9)        5 variables + 4 rasgos de tiempo
-+ embedding del space_id     8 dimensiones, concatenado en cada paso
++ embedding del space_id       8 dimensiones, concatenado en cada paso
   GRU 1   (lote, 12, 128)
   dropout 0.2
   GRU 2   (lote, 12, 64)
@@ -58,39 +39,36 @@ entrada   (lote, 12, 9)        5 variables + 4 rasgos de tiempo
 salida    (lote, 6, 5)         6 pasos × 5 variables, sin activación
 ```
 
-95,662 parámetros entrenables.
+95,118 parámetros entrenables.
 
-### Las dos implementaciones recurrentes
+### Por qué la celda está escrita a mano
 
-`config.GRU_IMPLEMENTATION` elige entre dos celdas con la misma arquitectura:
-
-| Valor | Qué es |
-|---|---|
-| `"cho"` *(por omisión)* | `GRUCell`, las ecuaciones 1 a 4 de la sección 4.2.7.2 escritas literalmente. Las ecuaciones que publica la tesis son las que producen los resultados. |
-| `"pytorch"` | `nn.GRU`, la variante fusionada de cuDNN. Unas 15× más rápida, pero no es la misma formulación. |
-
-Las dos diferencias con `nn.GRU`, que son la razón de que `GRUCell` exista:
+PyTorch tiene su propia celda GRU (`nn.GRU`), más rápida, pero no es la
+formulación del documento:
 
 1. **Dónde se aplica el reset.** La ecuación 3 multiplica `r_t ⊙ h_{t-1}` y
-   después aplica `W_h`. `nn.GRU` calcula `r_t ⊙ (W_hn·h_{t-1} + b_hn)`:
-   la transformación lineal primero y el reset después. Son operaciones
+   después aplica `W_h`. `nn.GRU` calcula `r_t ⊙ (W_hn·h_{t-1} + b_hn)`: la
+   transformación lineal primero y el reset después. Son operaciones
    genuinamente distintas.
 2. **El sentido de la compuerta update.** La ecuación 4 trata `z_t` como
    "cuánto tomar de lo nuevo"; `nn.GRU` lo trata como "cuánto conservar de lo
    viejo". Esta sí es solo convención de signo.
 
-`GRUCell.reset_parameters()` replica el esquema de inicialización de
-`nn.GRU` — uniforme en ±1/√(unidades) — para que la comparación entre las dos
-sea justa: una diferencia en resultados debe venir de la formulación, no de un
-punto de partida distinto.
+Escribirla a mano garantiza que las ecuaciones publicadas en la tesis son las
+que producen los resultados. El costo es velocidad: un bucle de Python por paso
+de tiempo no puede usar el núcleo fusionado de cuDNN. Con los datos actuales
+son unos 60 s de entrenamiento en lugar de 6.
 
-Otras dos decisiones que no son obvias desde el documento:
+Hasta noviembre de 2026 convivían las dos implementaciones. Con la misma
+semilla y los mismos datos dieron resultados equivalentes (MAE global 26.07
+con la celda a mano contra 26.47 con `nn.GRU`), y se quedó solo la celda del
+documento.
 
-**Las capas van como dos módulos separados.** Con `--implementation pytorch`
-esto es obligado: PyTorch fuerza a que todas las capas de un mismo `nn.GRU`
-compartan `hidden_size`, y la especificación pide [128, 64]. Por lo mismo el
-dropout va como módulo explícito, porque el argumento `dropout` de `nn.GRU`
-solo actúa entre capas internas.
+### Otras decisiones
+
+**Las capas van como dos módulos separados** porque la especificación pide
+tamaños distintos, [128, 64], y el dropout va como módulo explícito entre
+ellas.
 
 **El `space_id` entra como embedding, no como one-hot.** El salón 3302 no es
 "más" que el 3301, así que no puede entrar como número. Un one-hot crecería con
@@ -105,45 +83,34 @@ entero, porque las 23:55 están a un paso de las 00:00 pero como número están 
 
 **La normalización se ajusta solo con entrenamiento.** Calcular la media y la
 sigma sobre todo el dataset mete información del futuro en el preprocesamiento,
-y las métricas salen mejores de lo que son. `Normalizer.ajustar()` recibe solo
-la partición de entrenamiento.
+y las métricas salen mejores de lo que son. `Normalizer.fit()` recibe solo la
+partición de entrenamiento.
 
-**La partición es temporal, no aleatoria.** Una partición al azar dejaría el
-paso *t* en entrenamiento y el *t+1* en prueba: el modelo se evaluaría contra
-datos casi idénticos a los que vio.
+**La partición es por días completos, no aleatoria.** Una partición al azar
+dejaría el paso *t* en entrenamiento y el *t+1* en prueba. Validación y prueba
+son los últimos días entre semana; los fines de semana se quedan en
+entrenamiento, porque lo que importa predecir son los días con clase.
 
 **Las ventanas no cruzan bloques.** Unir dos tramos separados por días produce
 ejemplos falsos. Una ventana es válida solo si sus 18 pasos caen en el mismo
-bloque contiguo, sin faltantes y en la misma partición.
+bloque contiguo, sin faltantes y en la misma partición. Esa regla vive solo en
+`common/data.py`; SARIMAX usa las mismas ventanas.
 
-**El MAPE reporta su cobertura.** Se indefine donde el valor real es 0, y eso
-pasa en el 39% de las lecturas de luz y en más de la mitad de las de
-movimiento. Se calcula sobre las observaciones distintas de cero y se reporta
-qué fracción cubrió, en vez de presentar como global un porcentaje sacado de
-media muestra.
+**El MAPE reporta su cobertura.** Se indefine donde el valor real es 0, lo que
+pasa con la luz de noche y con el movimiento casi siempre. Se calcula sobre las
+observaciones distintas de cero y se reporta qué fracción cubrió.
 
 ## Decisiones abiertas
 
 **`motion` es binaria y se está prediciendo con MSE.** La tabla 1 de la
 sección 5.3 del documento recomienda sigmoide para variables en [0, 1], pero la
-capa de salida va sin activación por ser regresión continua. La consecuencia se
-mide: en la prueba sintética, `motion` sale con R² de 0.56 y sMAPE de 133%,
-contra R² de 0.99 en CO₂. La alternativa limpia es una cabeza aparte con
-`BCEWithLogitsLoss` y reportarle precisión/recall en lugar de MAE. Sin resolver.
-
-**Normalización global contra por espacio.** `config.py` sigue al documento
-(global por variable), pero `--normalize-by-space` existe porque las
-escalas de iluminancia difieren en dos órdenes de magnitud entre espacios y lo
-global colapsa los espacios oscuros cerca de cero. Falta comparar las dos.
+capa de salida va sin activación por ser regresión continua. La alternativa
+limpia es una cabeza aparte con `BCEWithLogitsLoss` y reportarle precisión y
+recall en lugar de MAE. Sin resolver.
 
 ## Pendiente
 
 - Nota al pie en la tesis sobre la segunda diferencia con `nn.GRU` (el sentido
   de la compuerta update), por si alguien compara el código con la ecuación 4.
-- Baseline SARIMAX, en `src/sarimax/`, sobre las mismas particiones y métricas.
-  Antes hay que resolver lo de la estacionalidad: `s=288` tarda 104 s por modelo
-  contra 0.3 s de los términos de Fourier.
-- Predicción iterativa hasta 2 horas (sección 4.2.5 del documento).
-- Detector de anomalías 3σ, en `src/anomalias/`.
-- Extraer a `src/common/` lo que compartan GRU y SARIMAX, para que compitan con
-  las mismas particiones y el mismo código de métricas.
+- Detector de anomalías 3σ.
+- Reentrenar con más semanas de datos: con una semana, SARIMAX todavía gana.

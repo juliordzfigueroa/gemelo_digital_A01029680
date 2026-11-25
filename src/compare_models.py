@@ -38,17 +38,17 @@ from common import config as cfg
 from common import data as dat
 from common import metrics as met
 from gru import train as ent_gru
+from sarimax import model as mod_sarimax
 from sarimax import train as ent_sarimax
 
 
-def run_gru(df, implementation: str, epochs: int, patience: int) -> dict:
+def run_gru(df, epochs: int, patience: int) -> dict:
     """Train the GRU and return its test metrics.
 
     Args:
         df: Frame satisfying the data contract.
-        implementacion: "cho" or "pytorch".
-        epocas: Maximum epochs.
-        paciencia: Epochs without improvement before early stopping.
+        epochs: Maximum epochs.
+        patience: Epochs without improvement before early stopping.
 
     Returns:
         A dict with the metrics, the horizon breakdown and the elapsed seconds.
@@ -58,47 +58,30 @@ def run_gru(df, implementation: str, epochs: int, patience: int) -> dict:
         epochs=epochs,
         patience=patience,
         quiet=True,
-        implementation=implementation,
     )
     return {
         "results": output["results"],
         "horizon": output["horizon"],
         "seconds": output["seconds"],
-        "detail": f"GRU [128, 64], implementacion {implementation}",
+        "detail": "GRU [128, 64], ecuaciones 1-4",
     }
 
 
-def run_sarimax(df, seasonality: str, order: tuple[int, int, int]) -> dict:
+def run_sarimax(df) -> dict:
     """Fit the SARIMAX baseline and return its test metrics.
 
     Args:
         df: Frame satisfying the data contract.
-        estacionalidad: "fourier" or "estacional".
-        orden: Non-seasonal (p, d, q).
 
     Returns:
         A dict with the metrics, the horizon breakdown and the elapsed seconds.
     """
-    import time
-
-    preprocessed, _ = dat.preprocess(df.copy())
-    grids = ent_sarimax.grid_by_space(preprocessed)
-    origins = ent_sarimax.test_windows(preprocessed)
-    target = ent_sarimax.real_targets(grids, origins)
-
-    # Same guard as the standalone script: refuse to compare models that were
-    # not scored on identical windows.
-    ent_sarimax.check_against_gru(df.copy(), target)
-
-    t0 = time.time()
-    prediction, _ = ent_sarimax.fit_all(
-        preprocessed, grids, origins, seasonality, order
-    )
+    output = ent_sarimax.run(df.copy())
     return {
-        "results": met.evaluate(target, prediction),
-        "horizon": met.by_horizon(target, prediction),
-        "seconds": time.time() - t0,
-        "detail": f"SARIMAX {order}, estacionalidad {seasonality}",
+        "results": output["results"],
+        "horizon": output["horizon"],
+        "seconds": output["seconds"],
+        "detail": f"SARIMAX {mod_sarimax.ORDER} + Fourier K={mod_sarimax.HARMONICS}",
     }
 
 
@@ -158,23 +141,17 @@ def main() -> int:
     )
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--patience", type=int, default=8)
-    parser.add_argument("--implementation", choices=("cho", "pytorch"), default="pytorch")
-    parser.add_argument(
-        "--seasonality", choices=("fourier", "seasonal"), default="fourier"
-    )
-    parser.add_argument("--order", default="2,0,2")
     args = parser.parse_args()
 
-    order = tuple(int(x) for x in args.order.split(","))
     df = dat.load_data(args.data)
     print(f"Datos: {len(df):,} filas, espacios {sorted(df[cfg.SPACE_COLUMN].unique())}")
 
     print("\n== Entrenando el GRU ==")
-    gru = run_gru(df, args.implementation, args.epochs, args.patience)
+    gru = run_gru(df, args.epochs, args.patience)
     print(f"  listo en {gru['seconds']:.1f} s")
 
     print("\n== Ajustando SARIMAX ==")
-    sarimax = run_sarimax(df, args.seasonality, order)
+    sarimax = run_sarimax(df)
 
     print_comparison(gru, sarimax)
 

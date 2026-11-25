@@ -6,15 +6,16 @@ model is only useful alongside its normalizer: without the mean and sigma it
 was trained with, its outputs cannot be turned back into physical units.
 
 Usage, from the src/ directory:
-    python -m gru.train                        # synthetic data
-    python -m gru.train --data ruta.parquet   # once real readings exist
-    python -m gru.train --known-series-test --implementation pytorch
+    python -m gru.train
+    python -m gru.train --data ruta.parquet --label otro_nombre
+
+The check that the network can learn a known series lives in gru/check.py.
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Made --known-series-test honour --implementation.
+    2026-11-25 - Single recurrent implementation; check moved to check.py.
 
 Reference:
     Sections 4.2.6 and 5.5 of the research document.
@@ -52,7 +53,7 @@ def set_seed(seed: int = cfg.SEED) -> None:
     """Seed every random source so a run can be reproduced.
 
     Args:
-        semilla: Seed shared by torch, numpy and CUDA.
+        seed: Seed shared by torch, numpy and CUDA.
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -70,10 +71,10 @@ def run_epoch(
     """Run one full pass over a data loader.
 
     Args:
-        red: The network.
-        cargador: Batches to iterate over.
+        net: The network.
+        loader: Batches to iterate over.
         loss_fn: Loss function.
-        optimizador: Optimizer to step, or None to evaluate without training.
+        optimizer: Optimizer to step, or None to evaluate without training.
         dev: Device to run on.
 
     Returns:
@@ -106,58 +107,50 @@ def run_epoch(
     return total / max(n, 1)
 
 
-def predict(
+def predict_windows(
     net: nn.Module, loader: DataLoader, dev: torch.device
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Run inference over a whole loader.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Run the network over every window of a loader.
+
+    Not to be confused with gru.predict, which forecasts one space forward
+    from its latest readings. This one scores a whole split at once.
 
     Args:
-        red: Trained network.
-        cargador: Batches to predict.
+        net: Trained network.
+        loader: Batches to predict.
         dev: Device to run on.
 
     Returns:
-        A tuple of (ground truth, predictions, space indices), all still in
-        normalized space.
+        A tuple of (ground truth, predictions), both still in normalized space.
 
     Raises:
         RuntimeError: If the loader yielded no windows at all.
     """
     net.eval()
-    actual_values, predicted, spaces = [], [], []
+    actual_values, predicted = [], []
     with torch.no_grad():
         for features, space, target in loader:
             prediction = net(features.to(dev), space.to(dev))
             actual_values.append(target.numpy())
             predicted.append(prediction.cpu().numpy())
-            spaces.append(space.numpy())
     if not actual_values:
         raise RuntimeError("the loader produced no windows")
-    return (
-        np.concatenate(actual_values),
-        np.concatenate(predicted),
-        np.concatenate(spaces),
-    )
+    return np.concatenate(actual_values), np.concatenate(predicted)
 
 
 def train(
     df: pd.DataFrame,
-    by_space: bool = False,
     epochs: int = cfg.MAX_EPOCHS,
     patience: int = cfg.PATIENCE,
     quiet: bool = False,
-    implementation: str = cfg.GRU_IMPLEMENTATION,
 ) -> dict:
     """Train the network and evaluate it on the test split.
 
     Args:
         df: Frame satisfying the data contract.
-        by_space: Whether to normalize per space instead of globally.
-        epocas: Maximum number of epochs.
-        paciencia: Epochs without validation improvement before stopping.
-        silencioso: Suppress progress output.
-        implementacion: "cho" for the literal equations of section 4.2.7.2,
-            "pytorch" for the faster cuDNN variant.
+        epochs: Maximum number of epochs.
+        patience: Epochs without validation improvement before stopping.
+        quiet: Suppress progress output.
 
     Returns:
         A dict holding the trained network, its normalizer, the training
@@ -169,9 +162,7 @@ def train(
     set_seed()
     dev = device()
 
-    datasets, normalizer, columns, space_index = dat.prepare(
-        df, by_space=by_space
-    )
+    datasets, normalizer, columns, space_index = dat.prepare(df)
     loaders = dat.loaders(datasets)
 
     if not quiet:
@@ -187,21 +178,16 @@ def train(
         for name, dataset in datasets.items():
             print(f"  {name:14} {len(dataset):7,}")
 
-    empty_rows = [n for n, c in datasets.items() if len(c) == 0]
-    if empty_rows:
+    empty_splits = [name for name, dataset in datasets.items() if len(dataset) == 0]
+    if empty_splits:
         raise RuntimeError(
-            f"splits {empty_rows} produced no windows; "
+            f"splits {empty_splits} produced no windows; "
             "more data or longer contiguous blocks are needed"
         )
 
-    net = mod.build(
-        n_spaces=len(space_index),
-        n_continuous_features=len(columns),
-        implementation=implementation,
-    ).to(dev)
+    net = mod.build(n_spaces=len(space_index), n_continuous_features=len(columns)).to(dev)
     if not quiet:
-        print(f"\nImplementacion recurrente: {implementation}")
-        print(f"Parametros entrenables: {net.n_parameters():,}")
+        print(f"\nParametros entrenables: {net.n_parameters():,}")
 
     # MSE because this is regression over continuous values with no activation
     # on the output layer: the standard pairing from Table 1, section 5.3.
@@ -216,14 +202,12 @@ def train(
     t0 = time.time()
 
     for epoch in range(1, epochs + 1):
-        p_train = run_epoch(
-            net, loaders["train"], loss_fn, optimizer, dev
-        )
-        p_val = run_epoch(net, loaders["validation"], loss_fn, None, dev)
-        history.append({"epoch": epoch, "train": p_train, "validation": p_val})
+        loss_train = run_epoch(net, loaders["train"], loss_fn, optimizer, dev)
+        loss_val = run_epoch(net, loaders["validation"], loss_fn, None, dev)
+        history.append({"epoch": epoch, "train": loss_train, "validation": loss_val})
 
-        if p_val < best_loss - cfg.MIN_IMPROVEMENT:
-            best_loss = p_val
+        if loss_val < best_loss - cfg.MIN_IMPROVEMENT:
+            best_loss = loss_val
             best_epoch = epoch
             # Copy to CPU: a state dict left on the GPU carries the device with
             # it and fails to load on a machine without CUDA.
@@ -238,7 +222,7 @@ def train(
 
         if not quiet and (epoch <= 5 or epoch % 10 == 0 or stamp):
             print(
-                f"  epoca {epoch:3d}  tren {p_train:.6f}  val {p_val:.6f}"
+                f"  epoca {epoch:3d}  tren {loss_train:.6f}  val {loss_val:.6f}"
                 f"  (sin mejora: {no_improvement}){stamp}"
             )
 
@@ -259,25 +243,21 @@ def train(
         )
 
     # Evaluate in physical units, never in z-score space.
-    real_n, pred_n, spaces = predict(net, loaders["test"], dev)
-    inverse = {v: k for k, v in space_index.items()}
-    ids = np.array([inverse[int(i)] for i in spaces])
-    real = normalizer.denormalize(real_n, cfg.ACTIVE_VARIABLES, ids)
-    pred = normalizer.denormalize(pred_n, cfg.ACTIVE_VARIABLES, ids)
+    real_n, pred_n = predict_windows(net, loaders["test"], dev)
+    real = normalizer.denormalize(real_n, cfg.ACTIVE_VARIABLES)
+    pred = normalizer.denormalize(pred_n, cfg.ACTIVE_VARIABLES)
 
-    results = met.evaluate(real, pred)
     return {
         "net": net,
         "normalizer": normalizer,
         "columns": columns,
         "space_index": space_index,
-        "historia": history,
+        "history": history,
         "best_epoch": best_epoch,
         "best_val_loss": best_loss,
         "seconds": duration,
-        "results": results,
+        "results": met.evaluate(real, pred),
         "horizon": met.by_horizon(real, pred),
-        "implementation": implementation,
     }
 
 
@@ -285,9 +265,9 @@ def save(output: dict, folder: Path = cfg.MODELS, label: str = "gru") -> None:
     """Persist the weights, the normalizer and the run metadata.
 
     Args:
-        salida: Dict returned by train().
-        carpeta: Destination directory.
-        etiqueta: Filename prefix for the three files written.
+        output: Dict returned by train().
+        folder: Destination directory.
+        label: Filename prefix for the three files written.
     """
     folder.mkdir(parents=True, exist_ok=True)
     torch.save(output["net"].state_dict(), folder / f"{label}.pt")
@@ -301,7 +281,6 @@ def save(output: dict, folder: Path = cfg.MODELS, label: str = "gru") -> None:
         "output_steps": cfg.OUTPUT_STEPS,
         "hidden_units": cfg.HIDDEN_UNITS,
         "dropout": cfg.DROPOUT,
-        "implementation": output["implementation"],
         "training_seconds": round(output["seconds"], 1),
         "best_epoch": output["best_epoch"],
         "best_val_loss": output["best_val_loss"],
@@ -315,88 +294,6 @@ def save(output: dict, folder: Path = cfg.MODELS, label: str = "gru") -> None:
         f"\nGuardado en {folder.relative_to(cfg.ROOT)}/: {label}.pt, "
         f"{label}_normalizer.json, {label}_metadata.json"
     )
-
-
-def known_series(days: int = 20, n_spaces: int = 2) -> pd.DataFrame:
-    """Build a clean, deterministic series whose structure is known exactly.
-
-    Classes run on weekdays from 8:00 to 14:00. CO2 follows the occupancy with
-    a first-order lag, temperature and humidity follow a daily cycle plus the
-    occupancy, light follows daylight, and movement is the occupancy itself.
-    No noise and no gaps: a network that cannot fit this has a bug.
-
-    Args:
-        dias: Length of the series in days, starting on a Monday.
-        n_spaces: How many spaces, each with a different CO2 amplitude so
-            the space embedding has something to learn.
-
-    Returns:
-        A frame satisfying the data contract.
-    """
-    stamps = pd.date_range("2026-01-05", periods=days * 288, freq="5min")
-    hour = np.asarray(stamps.hour + stamps.minute / 60)
-    weekday = np.asarray(stamps.dayofweek < 5)
-    occupancy = (weekday & (hour >= 8) & (hour < 14)).astype(float)
-    cycle = np.sin(2 * np.pi * (hour - 9) / 24)
-    sun = np.clip(np.sin(np.pi * (hour - 7) / 12), 0, None)
-
-    parts = []
-    for space in range(1, n_spaces + 1):
-        target = 420 + 600 * (1 + 0.3 * (space - 1)) * occupancy
-        co2 = np.empty_like(target)
-        level = 420.0
-        for i, goal in enumerate(target):
-            level += 0.08 * (goal - level)
-            co2[i] = level
-        parts.append(pd.DataFrame({
-            cfg.TIME_COLUMN: stamps,
-            cfg.SPACE_COLUMN: space,
-            "co2": co2,
-            "temperature": 22 + 1.5 * cycle + (co2 - 420) / 600,
-            "humidity": 50 - 4 * cycle + 3 * occupancy,
-            "light": np.clip(70 * sun + 20 * occupancy, 0, 100),
-            "motion": occupancy,
-        }))
-    return pd.concat(parts, ignore_index=True)
-
-
-def implementation_check(implementation: str = cfg.GRU_IMPLEMENTATION) -> int:
-    """Check that the network can learn something whose answer is known.
-
-    This is the test that stands in for reproducing a published benchmark: if
-    the GRU cannot fit a clean, deterministic series, the bug is in the code
-    and not in the data. It is not a performance result to report, only
-    evidence that the pipeline works.
-
-    Args:
-        implementacion: Which recurrent cell to exercise. "pytorch" runs in
-            seconds and is the sensible choice for a live check; "cho" takes
-            minutes because of the Python loop over timesteps.
-
-    Returns:
-        Process exit code: 0 when the network learns, 1 when it does not.
-    """
-    print("== Prueba de implementacion: serie conocida sin ruido ni huecos, 20 dias ==")
-    df = known_series()
-    output = train(
-        df, epochs=30, patience=8, quiet=False, implementation=implementation
-    )
-    met.print_report(output["results"], "Prueba de implementacion")
-
-    r2_global = output["results"]["global"]["r2"]
-    continuous = [v for v in cfg.ACTIVE_VARIABLES if v not in cfg.BINARY]
-    r2_continuous = [output["results"]["by_variable"][v]["r2"] for v in continuous]
-    print(
-        f"\n  R2 global {r2_global:.4f} | R2 de las continuas: "
-        + ", ".join(f"{v}={r:.3f}" for v, r in zip(continuous, r2_continuous))
-    )
-
-    if min(r2_continuous) < 0.5:
-        print("\n  FALLO: hay variables continuas con R2 < 0.5 sobre una serie")
-        print("  limpia y predecible. El problema esta en el codigo, no en los datos.")
-        return 1
-    print("\n  OK: la red aprende la estructura de una serie conocida.")
-    return 0
 
 
 def main() -> int:
@@ -415,45 +312,19 @@ def main() -> int:
     )
     parser.add_argument("--epochs", type=int, default=cfg.MAX_EPOCHS)
     parser.add_argument("--patience", type=int, default=cfg.PATIENCE)
-    parser.add_argument(
-        "--normalize-by-space",
-        action="store_true",
-        help="fit mean and sigma per space instead of globally",
-    )
-    parser.add_argument(
-        "--implementation",
-        choices=("cho", "pytorch"),
-        default=cfg.GRU_IMPLEMENTATION,
-        help="'cho' writes out equations 1-4; 'pytorch' uses the cuDNN variant",
-    )
     parser.add_argument("--label", default="gru")
-    parser.add_argument(
-        "--known-series-test",
-        action="store_true",
-        help="run only the implementation check and exit",
-    )
     args = parser.parse_args()
-
-    if args.known_series_test:
-        return implementation_check(args.implementation)
 
     df = dat.load_data(args.data)
     print(f"Datos: {len(df):,} filas, espacios {sorted(df[cfg.SPACE_COLUMN].unique())}")
 
-    output = train(
-        df,
-        by_space=args.normalize_by_space,
-        epochs=args.epochs,
-        patience=args.patience,
-        implementation=args.implementation,
-    )
+    output = train(df, epochs=args.epochs, patience=args.patience)
     met.print_report(output["results"], "Conjunto de prueba")
 
     print("\n== MAE por horizonte de prediccion ==")
-    variables = list(next(iter(output["horizon"].values())).keys())
-    print(f"  {'horizon':10} " + " ".join(f"{v:>12}" for v in variables))
+    print(f"  {'horizon':10} " + " ".join(f"{v:>12}" for v in cfg.ACTIVE_VARIABLES))
     for horizon, values in output["horizon"].items():
-        print(f"  {horizon:10} " + " ".join(f"{values[v]:12.4f}" for v in variables))
+        print(f"  {horizon:10} " + " ".join(f"{values[v]:12.4f}" for v in cfg.ACTIVE_VARIABLES))
 
     save(output, label=args.label)
     return 0
