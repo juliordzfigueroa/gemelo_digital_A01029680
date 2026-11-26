@@ -2,22 +2,23 @@
 
 Routes a question to one of four intents so the orchestrator knows which data
 to retrieve before calling the LLM, and reads what the question is about: one
-space ("3308") or a whole floor ("piso 3", "tercer piso", "planta baja"). Deliberately deterministic: the same
-question always yields the same intent, and no model call is involved.
+space ("3308"), a whole floor ("piso 3", "tercer piso", "planta baja") or the
+whole building. Deliberately deterministic: the same question always yields
+the same intent, and no model call is involved.
 
 Using the LLM to classify would add a second failure mode to every request.
 A wrong routing decision sends the wrong data into the prompt, and a prompt
 built from the wrong data produces a confident, wrong answer. Keyword rules
 are auditable and free; that is the better trade here.
 
-Keywords stay in Spanish because they match what the user types. Identifiers
-and documentation follow the project standard.
+The words it looks for live in llm/vocabulary.py; this file holds the rules.
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-05 - Read the floor a question names.
+    2026-11-26 - Word lists moved to vocabulary.py; removed the list of
+    present-state words, which could not change the result.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -25,129 +26,32 @@ Reference:
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 
 from common import config as cfg
 from common import spaces
-
-# --------------------------------------------------------------------------
-# Classification vocabulary
-# --------------------------------------------------------------------------
-ANOMALY_WORDS = [
-    "anomalía", "anomalia", "anomalías", "anomalias",
-    "raro", "rara", "extraño", "extraña",
-    "fuera de lo normal", "anormal", "inusual",
-    "problema", "alerta", "alarma", "peligro", "peligroso",
-    "excede", "supera", "demasiado", "muy alto", "muy alta",
-    "algo mal", "algo está mal", "algo esta mal",
-]
-
-FORECAST_WORDS = [
-    "estará", "estara", "estarán", "estaran",
-    "va a estar", "van a estar",
-    "predice", "predecir", "predicción", "prediccion", "predecirá",
-    "pronostica", "pronóstico", "pronostico",
-    "próximos", "proximos", "próximas", "proximas",
-    "más tarde", "mas tarde", "al rato",
-    "futuro", "tendencia", "subirá", "subira", "bajará", "bajara",
-]
-
-HISTORY_WORDS = [
-    "ayer", "anteayer", "la semana pasada", "el mes pasado",
-    "histórico", "historico", "histórica", "historica", "historial",
-    "cuándo fue", "cuando fue", "cuándo estuvo", "cuando estuvo",
-    "pico", "máximo", "maximo", "mínimo", "minimo",
-    "promedio", "últimos días", "ultimos dias",
-    "últimas horas", "ultimas horas", "últimas 24", "ultimas 24",
-    "se registró", "se registro", "hubo",
-]
-
-CURRENT_WORDS = [
-    "ahora", "actualmente", "en este momento", "hoy",
-    "cuál es", "cual es", "cuáles son", "cuales son",
-    "actual", "cómo está", "como esta", "cómo se encuentra",
-    "lectura", "dime el", "dime la",
-    "valores", "datos", "estado", "muéstrame", "muestrame", "quiero ver",
-]
-
-# Maps each active variable to the words a user might use for it. Keys come
-# from config so that narrowing ACTIVE_VARIABLES cannot leave this dict
-# claiming to detect something the model no longer predicts.
-VARIABLE_SYNONYMS = {
-    "co2": ["co2", "co₂", "dióxido de carbono", "dioxido de carbono", "aire"],
-    "temperature": ["temperatura", "calor", "frío", "frio", "fría", "fria", "grados"],
-    "humidity": ["humedad", "húmedo", "humedo", "húmeda", "humeda"],
-    "light": ["luz", "iluminación", "iluminacion", "iluminancia", "lux", "luminosidad"],
-    "motion": ["movimiento", "ocupación", "ocupacion", "personas", "gente", "ocupado"],
-}
+from llm import vocabulary as voc
 
 # Read once at import: a space added to spaces.json needs a restart to be
 # recognized in a question.
 SPACES = spaces.names()
 FLOOR_SPACES = spaces.floor_spaces()
 
-# Floor 0 is the ground floor ("planta baja"); "primer piso" is floor 1, as
-# the room numbers say (3305 is on floor 3).
-FLOOR_NUMBER_WORDS = {"cero": 0, "uno": 1, "dos": 2, "tres": 3, "cuatro": 4}
-FLOOR_ORDINALS = {
-    "primer": 1, "primero": 1, "segundo": 2,
-    "tercer": 3, "tercero": 3, "cuarto": 4,
-}
-FLOOR_NOUN = r"(?:piso|nivel|planta)"
-
-# Phrases that ask about every space at once. Matched as whole words: "todo"
-# is inside "método", and a substring match would send "¿qué método usas?"
-# to the whole building.
-BUILDING_WORDS = [
-    "todos los salones", "todas las aulas", "todos los espacios",
-    "todo el edificio", "el edificio", "edificio completo",
-    "cada salón", "cada salon", "en general", "resumen general",
-    "todo", "toda", "todos", "todas",
-]
+# Every name of every space, longest first, so "3110" is never read as "311"
+# plus a stray zero.
+NAMES_LONGEST_FIRST = sorted(
+    ((name, space_id) for space_id, names in SPACES.items() for name in names),
+    key=lambda pair: len(pair[0]),
+    reverse=True,
+)
 
 # Room numbers are building 3, then floor, then room: 3305 is floor 3,
 # room 05. Four digits from 1900 to 2099 are read as years, not rooms.
 ROOM_NUMBER = re.compile(r"\b(\d{4})\b")
 
-# --- Messages that are not questions about the building --------------------
-# All matched as whole words, and only when the question names no space,
-# floor or the building: "hola, ¿cómo está el 3308?" is a question about 3308.
-
-# Words that tie a question to the building even without naming a room.
-# Generic phrasing ("cuál es", "hoy") is not here on purpose: "¿cuál es la
-# capital de Francia?" has it too.
-DOMAIN_WORDS = [
-    "salón", "salon", "salones", "aula", "aulas", "piso", "pisos",
-    "edificio", "oficina", "oficinas", "sensor", "sensores",
-    "lectura", "lecturas", "valores", "datos", "medición", "medicion",
-    "mediciones", "estado", "ambiente", "ventilación", "ventilacion", "ventilar",
-]
-
-# About the assistant itself: greetings and "what is this".
-HELP_WORDS = [
-    "hola", "buenos días", "buenos dias", "buenas tardes", "buenas noches",
-    "buenas", "qué eres", "que eres", "quién eres", "quien eres",
-    "qué puedes", "que puedes", "qué sabes", "que sabes", "qué haces",
-    "que haces", "para qué sirves", "para que sirves", "cómo funciona",
-    "como funciona", "cómo te uso", "como te uso", "ayuda", "es esto",
-    "instrucciones",
-]
-
-THANKS_WORDS = ["gracias", "te agradezco", "muy amable"]
-
-# Requests a general-purpose chatbot would take and this one cannot.
-OUT_OF_SCOPE_WORDS = [
-    "escribe", "escríbeme", "escribeme", "redacta", "redáctame", "traduce",
-    "explícame", "explicame", "explica", "poema", "chiste", "cuento",
-    "canción", "cancion", "receta", "capital de", "quién fue", "quien fue",
-    "quién es", "quien es", "programa", "código", "codigo", "tarea", "ensayo",
-    "opinas", "opinión", "opinion", "chatgpt", "noticias", "película",
-    "pelicula", "fútbol", "futbol", "hace en",
-]
-
-# Horizon ceiling, kept in sync with the iterative predictor.
-MAX_HORIZON_MIN = 120
+# Horizon when a forecast question names none: one direct pass of the GRU.
 DEFAULT_HORIZON = 30
 
 
@@ -189,7 +93,7 @@ def classify(question: str) -> Intent:
     """Classify a question into one intent.
 
     Args:
-        pregunta: The question as typed by the user.
+        question: The question as typed by the user.
 
     Returns:
         A populated Intent.
@@ -201,12 +105,24 @@ def classify(question: str) -> Intent:
     kind = _detect_kind(text)
     variables = _extract_variables(text)
     space_id = _extract_space(text)
-    floor = _extract_floor(text) if space_id is None else None
-    building = (
-        space_id is None and floor is None and _contains_word(text, BUILDING_WORDS)
-    )
-    unknown_room = _extract_unknown_room(text) if space_id is None else None
+
+    # A space named in the text wins over a floor, and a floor over the
+    # building: "el 3308 del piso 3" is about 3308.
+    floor = None
+    building = False
+    unknown_room = None
+    if space_id is None:
+        floor = _extract_floor(text)
+        unknown_room = _extract_unknown_room(text)
+        if floor is None:
+            building = _contains_word(text, voc.BUILDING_WORDS)
+
     has_target = space_id is not None or floor is not None or building or unknown_room
+    chat = None if has_target else _detect_chat(text, variables)
+
+    horizon = DEFAULT_HORIZON
+    if kind == "forecast":
+        horizon = _extract_horizon(text)
 
     return Intent(
         kind=kind,
@@ -215,12 +131,8 @@ def classify(question: str) -> Intent:
         floor=floor,
         building=building,
         unknown_room=unknown_room,
-        chat=None if has_target else _detect_chat(text, variables),
-        horizon_min=(
-            _extract_horizon(text)
-            if kind == "forecast"
-            else DEFAULT_HORIZON
-        ),
+        chat=chat,
+        horizon_min=horizon,
         original_text=question,
     )
 
@@ -244,18 +156,18 @@ def _detect_chat(text: str, variables: list[str]) -> str | None:
     about_building = bool(
         variables
         or _mentions_future(text)
-        or _contains_any(text, ANOMALY_WORDS + FORECAST_WORDS + HISTORY_WORDS)
-        or _contains_word(text, DOMAIN_WORDS)
+        or _contains_any(text, voc.ANOMALY_WORDS + voc.FORECAST_WORDS + voc.HISTORY_WORDS)
+        or _contains_word(text, voc.DOMAIN_WORDS)
     )
     # Explicit general-chatbot requests win even over building words:
     # "explícame qué es el CO₂" asks for a lesson, not a reading.
-    if _contains_word(text, OUT_OF_SCOPE_WORDS):
+    if _contains_word(text, voc.OUT_OF_SCOPE_WORDS):
         return "out_of_scope"
     if about_building:
         return None
-    if _contains_word(text, THANKS_WORDS):
+    if _contains_word(text, voc.THANKS_WORDS):
         return "thanks"
-    if _contains_word(text, HELP_WORDS):
+    if _contains_word(text, voc.HELP_WORDS):
         return "help"
     return "out_of_scope"
 
@@ -263,7 +175,7 @@ def _detect_chat(text: str, variables: list[str]) -> str | None:
 def _detect_kind(text: str) -> str:
     """Pick the intent by keyword match, resolving conflicts by priority.
 
-    Priority is anomaly, then predictive, then historical, then current. It
+    Priority is anomaly, then forecast, then history, then current. It
     encodes urgency rather than precision: a question that says "raro" or
     "peligroso" goes to the detector even when it also asks about the future,
     because answering the safety question matters more than the horizon.
@@ -273,83 +185,69 @@ def _detect_kind(text: str) -> str:
     not a longer keyword list.
 
     Args:
-        texto: The lowercased question.
+        text: The lowercased question.
 
     Returns:
         The intent name.
     """
-    if _contains_any(text, ANOMALY_WORDS):
+    if _contains_any(text, voc.ANOMALY_WORDS):
         return "anomaly"
-    if _contains_any(text, FORECAST_WORDS) or _mentions_future(text):
+    if _contains_any(text, voc.FORECAST_WORDS) or _mentions_future(text):
         return "forecast"
-    if _contains_any(text, HISTORY_WORDS):
+    if _contains_any(text, voc.HISTORY_WORDS):
         return "history"
-    if _contains_any(text, CURRENT_WORDS):
-        return "current"
-    # Nothing matched. The present state is the cheapest answer to produce and
-    # the least likely to mislead, so it is the fallback.
+    # Everything else asks for the present state, which is also the cheapest
+    # answer to produce and the least likely to mislead.
     return "current"
 
 
 def _mentions_future(text: str) -> bool:
     """Detect an explicit future time reference such as "en 45 minutos".
 
-    Separate from the keyword list because it is a pattern, not a word, and
-    because the same regexes are reused to read the horizon.
-
     Args:
-        texto: The lowercased question.
+        text: The lowercased question.
 
     Returns:
         True if the question names a time offset into the future.
     """
-    return bool(
-        re.search(r"\ben\s+\d+\s*(min|hora)", text)
-        or re.search(r"\bdentro\s+de\s+\d+\s*(min|hora)", text)
-        or any(
-            phrase in text
-            for phrase in (
-                "en media hora", "en una hora", "en dos horas",
-                "dentro de una hora", "dentro de media hora",
-            )
-        )
-    )
+    if re.search(r"\ben\s+\d+\s*(min|hora)", text):
+        return True
+    if re.search(r"\bdentro\s+de\s+\d+\s*(min|hora)", text):
+        return True
+    return _contains_any(text, voc.FUTURE_PHRASES)
 
 
 def _extract_variables(text: str) -> list[str]:
     """Collect the environmental variables the question mentions.
 
+    Goes through config.ACTIVE_VARIABLES rather than the synonym table, so
+    narrowing the active variables cannot leave the classifier detecting
+    something the model no longer predicts.
+
     Args:
-        texto: The lowercased question.
+        text: The lowercased question.
 
     Returns:
         Variable names in the order config declares them. Empty means the
         question did not single any out, which the orchestrator reads as all.
     """
-    return [
-        variable
-        for variable in cfg.ACTIVE_VARIABLES
-        if _contains_any(text, VARIABLE_SYNONYMS.get(variable, [variable]))
-    ]
+    found = []
+    for variable in cfg.ACTIVE_VARIABLES:
+        if _contains_any(text, voc.VARIABLE_SYNONYMS.get(variable, [variable])):
+            found.append(variable)
+    return found
 
 
 def _extract_space(text: str) -> int | None:
-    """Find which space the question refers to.
+    """Find which registered space the question names.
 
     Args:
-        texto: The lowercased question.
+        text: The lowercased question.
 
     Returns:
-        The space id, or None when the question names no space, in which case
-        the caller supplies the one selected in the viewer.
+        The space id, or None when the question names no space.
     """
-    # Longest names first, so "3110" is never read as "311" plus a stray zero.
-    candidates = sorted(
-        ((name, space_id) for space_id, names in SPACES.items() for name in names),
-        key=lambda pair: len(pair[0]),
-        reverse=True,
-    )
-    for name, space_id in candidates:
+    for name, space_id in NAMES_LONGEST_FIRST:
         if name in text:
             return space_id
     return None
@@ -370,19 +268,24 @@ def _extract_floor(text: str) -> int | None:
         The floor number, or None when the question names no floor of the
         building.
     """
+    noun = voc.FLOOR_NOUN
+    number_words = "|".join(voc.FLOOR_NUMBER_WORDS)
+    ordinals = "|".join(voc.FLOOR_ORDINALS)
+
     floor = None
+    digit = re.search(rf"\b{noun}\s+(\d+)\b", text)
+    word = re.search(rf"\b{noun}\s+({number_words})\b", text)
+    ordinal = re.search(rf"\b({ordinals})\s+{noun}\b", text) or re.search(
+        rf"\b{noun}\s+({ordinals})\b", text
+    )
     if "planta baja" in text:
         floor = 0
-    elif found := re.search(rf"\b{FLOOR_NOUN}\s+(\d+)\b", text):
-        floor = int(found.group(1))
-    elif found := re.search(
-        rf"\b{FLOOR_NOUN}\s+({'|'.join(FLOOR_NUMBER_WORDS)})\b", text
-    ):
-        floor = FLOOR_NUMBER_WORDS[found.group(1)]
-    elif found := re.search(
-        rf"\b({'|'.join(FLOOR_ORDINALS)})\s+{FLOOR_NOUN}\b", text
-    ) or re.search(rf"\b{FLOOR_NOUN}\s+({'|'.join(FLOOR_ORDINALS)})\b", text):
-        floor = FLOOR_ORDINALS[found.group(1)]
+    elif digit:
+        floor = int(digit.group(1))
+    elif word:
+        floor = voc.FLOOR_NUMBER_WORDS[word.group(1)]
+    elif ordinal:
+        floor = voc.FLOOR_ORDINALS[ordinal.group(1)]
     return floor if floor in FLOOR_SPACES else None
 
 
@@ -407,32 +310,24 @@ def _extract_unknown_room(text: str) -> str | None:
 def _extract_horizon(text: str) -> int:
     """Read the prediction horizon in minutes.
 
-    Values are capped at MAX_HORIZON_MIN and rounded up to the sampling
-    interval, because the predictor only emits whole 5-minute steps.
+    Values are capped at config.MAX_HORIZON_MIN and rounded up to the
+    sampling interval, because the predictor only emits whole 5-minute steps.
 
     Args:
-        texto: The lowercased question.
+        text: The lowercased question.
 
     Returns:
         Minutes ahead, between the sampling interval and MAX_HORIZON_MIN.
     """
     minutes = None
-
-    found = re.search(r"(\d+)\s*min", text)
-    if found:
-        minutes = int(found.group(1))
+    in_minutes = re.search(r"(\d+)\s*min", text)
+    in_hours = re.search(r"(\d+)\s*hora", text)
+    if in_minutes:
+        minutes = int(in_minutes.group(1))
+    elif in_hours:
+        minutes = int(in_hours.group(1)) * 60
     else:
-        found = re.search(r"(\d+)\s*hora", text)
-        if found:
-            minutes = int(found.group(1)) * 60
-
-    if minutes is None:
-        for phrase, value in (
-            ("dos horas", 120), ("2 horas", 120),
-            ("hora y media", 90), ("1.5 horas", 90),
-            ("una hora", 60), ("1 hora", 60),
-            ("media hora", 30),
-        ):
+        for phrase, value in voc.HORIZON_PHRASES:
             if phrase in text:
                 minutes = value
                 break
@@ -441,18 +336,18 @@ def _extract_horizon(text: str) -> int:
         return DEFAULT_HORIZON
 
     step = cfg.INTERVAL_SECONDS // 60
-    minutes = max(step, min(minutes, MAX_HORIZON_MIN))
+    minutes = max(step, min(minutes, cfg.MAX_HORIZON_MIN))
     # Round up to a whole step: asking for 7 minutes gets 10, never 5, so the
     # answer always covers at least what was asked.
-    return int(-(-minutes // step) * step)
+    return math.ceil(minutes / step) * step
 
 
 def _contains_any(text: str, words: list[str]) -> bool:
     """Test whether any of the given phrases appears in the text.
 
     Args:
-        texto: The lowercased question.
-        palabras: Phrases to look for.
+        text: The lowercased question.
+        words: Phrases to look for.
 
     Returns:
         True if at least one phrase is present.
