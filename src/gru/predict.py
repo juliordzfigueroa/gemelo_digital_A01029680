@@ -14,8 +14,8 @@ Two modes, picked from the requested horizon:
 
 Three things this module does that are easy to get wrong:
 
-  - The space id is not the embedding index. `space_id` 3302 is a room
-    number; the network expects the row of the embedding table that space was
+  - The space id is not the embedding index. `space_id` 308 stands for room
+    3308; the network expects the row of the embedding table that space was
     assigned during training, which lives in the run metadata.
   - Time features are recomputed for the real future timestamps on every
     iteration. Carrying over the window's own time features would shift the
@@ -29,7 +29,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-25 - Single recurrent implementation; fixed stale names.
+    2026-11-26 - Removed leftovers of per-space normalization and of the
+    option to run without time features.
 
 Reference:
     Sections 4.2.5 and 4.2.6 of the research document.
@@ -151,7 +152,7 @@ def _check_layout(metadata: dict) -> list[str]:
         metadata: Metadata dict returned by load_model().
 
     Returns:
-        The names of the trailing time-feature columns, possibly empty.
+        The names of the trailing time-feature columns.
 
     Raises:
         RuntimeError: If the variables are not the leading columns.
@@ -179,18 +180,13 @@ def _time_features(stamps: pd.Series, names: list[str]) -> np.ndarray:
     Returns:
         An array shaped (len(stamps), len(names)).
     """
-    if not names:
-        return np.empty((len(stamps), 0), dtype=np.float32)
     frame = pd.DataFrame({cfg.TIME_COLUMN: stamps.reset_index(drop=True)})
     add_time_features(frame)
     return frame[names].to_numpy(dtype=np.float32)
 
 
 def _to_physical(
-    normalizer: Normalizer,
-    block: np.ndarray,
-    variables: list[str],
-    space_id: int,
+    normalizer: Normalizer, block: np.ndarray, variables: list[str]
 ) -> np.ndarray:
     """Convert a normalized block to physical units and clip it.
 
@@ -198,7 +194,6 @@ def _to_physical(
         normalizer: Fitted normalizer.
         block: Normalized predictions shaped (steps, n_variables).
         variables: Variable names matching the last axis.
-        space_id: Space the block belongs to.
 
     Returns:
         An array of the same shape in physical units, within the instrument
@@ -216,10 +211,7 @@ def _to_physical(
 
 
 def _to_normalized(
-    normalizer: Normalizer,
-    block: np.ndarray,
-    variables: list[str],
-    space_id: int,
+    normalizer: Normalizer, block: np.ndarray, variables: list[str]
 ) -> np.ndarray:
     """Convert a physical block back to normalized space.
 
@@ -231,13 +223,11 @@ def _to_normalized(
         normalizer: Fitted normalizer.
         block: Values in physical units shaped (steps, n_variables).
         variables: Variable names matching the last axis.
-        space_id: Space the block belongs to.
 
     Returns:
         An array of the same shape in normalized space.
     """
     frame = pd.DataFrame(block, columns=variables)
-    frame[cfg.SPACE_COLUMN] = space_id
     return normalizer.transform(frame)[variables].to_numpy(dtype=np.float32)
 
 
@@ -281,17 +271,12 @@ def _normalized_window(
             "window with gaps, so pick a contiguous one"
         )
 
-    frame = window.sort_values(cfg.TIME_COLUMN).reset_index(drop=True).copy()
-    if cfg.SPACE_COLUMN not in frame.columns:
-        frame[cfg.SPACE_COLUMN] = 0
-
+    frame = window.sort_values(cfg.TIME_COLUMN).reset_index(drop=True)
     normalized = normalizer.transform(frame)
     features = normalized[variables].to_numpy(dtype=np.float32)
 
-    if time_names:
-        ts = _time_features(frame[cfg.TIME_COLUMN], time_names)
-        features = np.concatenate([features, ts], axis=1)
-    return features
+    ts = _time_features(frame[cfg.TIME_COLUMN], time_names)
+    return np.concatenate([features, ts], axis=1)
 
 
 def last_contiguous_window(rows: pd.DataFrame, steps: int) -> pd.DataFrame | None:
@@ -407,7 +392,7 @@ def predict(
             output = net(input_tensor, space_t)
 
         norm_block = output[0].cpu().numpy()
-        physical_block = _to_physical(normalizer, norm_block, variables, space_id)
+        physical_block = _to_physical(normalizer, norm_block, variables)
         accumulated.append(physical_block)
 
         if iteration + 1 == n_iterations:
@@ -416,9 +401,7 @@ def predict(
         # Slide the window: drop the oldest block, append what was just
         # predicted. The clipped physical values go back, not the raw network
         # output, so an impossible value never becomes the next input.
-        feedback = _to_normalized(
-            normalizer, physical_block, variables, space_id
-        )
+        feedback = _to_normalized(normalizer, physical_block, variables)
         since = iteration * output_steps
         new_rows = np.concatenate(
             [feedback, future_time[since : since + output_steps]], axis=1
