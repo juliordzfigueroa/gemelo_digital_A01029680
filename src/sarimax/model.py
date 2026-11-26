@@ -45,7 +45,7 @@ HARMONICS = 4
 DAILY_PERIOD = 24 * 3600 // cfg.INTERVAL_SECONDS
 
 
-def fourier_terms(n: int, start: int = 0) -> np.ndarray:
+def fourier_terms(n: int) -> np.ndarray:
     """Build the sine and cosine regressors of the daily cycle.
 
     These enter SARIMAX as exogenous variables, which is the sum(beta_i X_i,t)
@@ -53,14 +53,13 @@ def fourier_terms(n: int, start: int = 0) -> np.ndarray:
     daily cycle instead of making it look a whole day back.
 
     Args:
-        n: How many consecutive steps to generate.
-        start: Index of the first step, so that a forecast continues the same
-            phase as the data it follows.
+        n: How many consecutive steps to generate, counted from the first step
+            of the space's grid.
 
     Returns:
         An array shaped (n, 2 * HARMONICS).
     """
-    t = np.arange(start, start + n)
+    t = np.arange(n)
     columns = []
     for k in range(1, HARMONICS + 1):
         angle = 2 * np.pi * k * t / DAILY_PERIOD
