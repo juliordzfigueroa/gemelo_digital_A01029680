@@ -112,5 +112,4 @@ recall en lugar de MAE. Sin resolver.
 
 - Nota al pie en la tesis sobre la segunda diferencia con `nn.GRU` (el sentido
   de la compuerta update), por si alguien compara el código con la ecuación 4.
-- Detector de anomalías 3σ.
 - Reentrenar con más semanas de datos: con una semana, SARIMAX todavía gana.

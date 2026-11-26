@@ -17,7 +17,7 @@ Julio César Rodríguez Figueroa — A01029680
 | **API** | FastAPI: recibe la pregunta, consulta al GRU, le pide la frase al LLM | lista, con datos reales limpios |
 | **Visor** | Potree en el navegador: un escaneo por piso, marcadores por salón y chat | listo; faltan los marcadores de los salones y corregir la altura entre pisos |
 | **Servidor de escaneos** | Sirve las nubes convertidas, aparte de la API | listo |
-| Detector de anomalías 3σ | | pendiente |
+| **Detector de anomalías** | Regla 3σ sobre la última lectura; el chat la usa en las preguntas de anomalía | listo; no detecta sensores atascados (medido) |
 
 El GRU es de dos capas [128, 64], con un ID de espacio como rasgo para que un
 solo modelo sirva a todo el edificio. Su celda recurrente está escrita a mano
@@ -501,7 +501,7 @@ Qué está conectado y qué no:
 | GRU, predicción directa e iterativa | real, desde `models/gru.pt` |
 | Clasificación de la pregunta y prompts | real |
 | Fuente de datos | archivo limpio `aulas3.parquet`; la base de datos del Tec queda pendiente (`TODO E5` en `api/retrieval.py`) |
-| Detector de anomalías | **no existe**; la API lo dice en vez de responder que no hay nada |
+| Detector de anomalías | regla 3σ con la media y sigma del entrenamiento; distingue "no encontró nada" de "no se pudo revisar" |
 
 Diseño de esta capa en [src/llm/README.md](src/llm/README.md).
 
@@ -669,6 +669,7 @@ Vale para las consolas que se abran después, no para la actual.
 ```powershell
 python -m llm.classifier                               # cómo se rutean las preguntas
 python -m llm.context                                  # los prompts por tipo
+python -m anomaly.evaluate                             # precisión y recall del detector 3σ
 ```
 
 | Opción | Para qué |
@@ -729,6 +730,7 @@ cuando un nodo pierde la red.
 src/common/        contrato de datos, ventanas, normalización, métricas, registro de salones
 src/gru/          modelo, entrenamiento y predicción
 src/sarimax/      baseline estadístico
+src/anomaly/      detector de anomalías 3σ y su evaluación
 src/llm/          clasificador y vocabulario, prompts, frases fijas, cliente de Ollama
 src/api/          orquestador FastAPI y recuperación de datos; también sirve el visor
 src/scans/        alineación y conversión de escaneos, servidor de nubes
@@ -747,6 +749,7 @@ check_gpu.py      diagnóstico de CUDA
 | [src/gru/README.md](src/gru/README.md) | Decisiones de diseño del GRU y qué queda abierto |
 | [src/llm/README.md](src/llm/README.md) | La capa conversacional: qué se le puede preguntar, y el reparto de trabajo con el LLM |
 | [src/sarimax/README.md](src/sarimax/README.md) | El baseline, y por qué no `s=288` |
+| [src/anomaly/README.md](src/anomaly/README.md) | El detector 3σ: qué detecta y qué no, medido con anomalías inyectadas |
 | [docs/mapa_codigo.md](docs/mapa_codigo.md) | Guía para leer el código por partes: ideas, orden de lectura y preguntas para comprobar |
 | [docs/estandar_codigo.md](docs/estandar_codigo.md) | Convención de documentación del código |
 | [docs/estandar_commits.md](docs/estandar_commits.md) | Convención de mensajes de commit |
