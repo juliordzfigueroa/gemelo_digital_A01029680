@@ -36,7 +36,7 @@ def scope_names(data: dict) -> tuple[str, str]:
     """Return the heading and the phrase that name a floor or the building.
 
     Args:
-        data: Built by api._floor_data.
+        data: Built by retrieval.floor_data().
 
     Returns:
         A tuple such as ("PISO 3", "el piso 3").
@@ -53,7 +53,7 @@ def prompt(intent: Intent, data: dict) -> str:
 
     Args:
         intent: The classified question.
-        data: Built by api._floor_data: "scope", "floor", "kind", "rooms",
+        data: Built by retrieval.floor_data(): "scope", "floor", "kind", "rooms",
             "summary" and, by kind, "timestamp", "horizon_min", "method",
             "warning", "since", "until".
 
@@ -173,7 +173,7 @@ def detail(data: dict) -> str:
     for the building, where the list would run to twenty.
 
     Args:
-        data: Built by api._floor_data.
+        data: Built by retrieval.floor_data().
 
     Returns:
         The detail block, possibly empty.
@@ -200,7 +200,7 @@ def _room_values(data: dict, room: dict) -> str:
     """Write the values of one room for the detail block.
 
     Args:
-        data: Built by api._floor_data; its "kind" and "variables" decide
+        data: Built by retrieval.floor_data(); its "kind" and "variables" decide
             what is written.
         room: One entry of data["rooms"].
 
