@@ -81,7 +81,8 @@ capital de Francia?".
 hora?"), comparar dos salones, fechas u horas concretas ("el martes a las
 10"), más de una variable en el histórico, detectar sensores atascados, y
 datos en vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
-3208, 3304 (sin CO₂ casi siempre), 3305, 3308 y la oficina 4-2.
+3208, 3304 (sin CO₂ casi siempre), 3305, 3308 y la oficina de mentores del piso 4
+(solo 2 lecturas, del 2 de octubre).
 
 **Fallas conocidas de redacción:** Llama omite a veces la advertencia de la
 predicción iterativa (el visor la muestra igual, debajo de la respuesta) y a
@@ -92,7 +93,7 @@ veces omite el nombre del salón extremo en el resumen.
 | Falla observada | Corrección |
 |---|---|
 | "Disminuirá de 665 a 728 ppm" (sube) | La dirección va escrita en el prompt: "sube 62.8 ppm" |
-| "Espacio 308", "espacio 5", "space_4_2" | El prompt nombra cada espacio por su número de salón u "oficina 4-2" |
+| "Espacio 308", "espacio 5", "space_4_2" | El prompt nombra cada espacio por su número de salón o por su nombre ("oficina mentores") |
 | Reportaba las cinco variables cuando se preguntó por una | La lectura actual solo lleva las variables preguntadas |
 | Inventó los salones 3310 a 3334 como "espacios sin datos" | Llama solo escribe el resumen; el detalle por salón y la lista de espacios sin sensor los escribe el código |
 | Respuestas de piso cortadas a la mitad y adjetivos exagerados ("632 ppm es alta") | Mismo arreglo: el resumen es corto y solo puede usar los adjetivos de la sección FUERA DE RANGO del prompt |
@@ -118,7 +119,9 @@ api/api.py            rutea entre todos los anteriores y sirve el visor
 
 El registro de salones (`config/spaces.json`) se lee en un solo lugar,
 `common/spaces.py`: los nombres para el clasificador, la etiqueta de cada
-espacio ("3308", "oficina 4-2") y a qué piso pertenece.
+espacio ("3308", "oficina mentores") y a qué piso pertenece. Los espacios sin
+número de salón, como las oficinas y salas del piso 4, llevan su nombre en el
+campo `label`; ese nombre también se puede escribir en el chat.
 
 **Todos los números salen de los tres primeros pasos. El LLM solo redacta.**
 Nunca se le pide calcular, comparar entre espacios ni estimar lo que falta,
