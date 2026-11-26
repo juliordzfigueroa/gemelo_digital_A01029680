@@ -166,7 +166,7 @@ def expected_error(error: dict | None) -> str:
     """Write the typical error of an estimate, one variable after another.
 
     Args:
-        error: Per variable, from api.estimates.expected_error(), or None
+        error: Per variable, from api.sources.provenance(), or None
             when the validation was never run.
 
     Returns:

@@ -22,6 +22,13 @@ const SURVEY_KEY = "aulas3-survey";
 const SURVEY_MODE = new URLSearchParams(location.search).has("medir");
 // The API names question types in English (code identifiers); the person
 // reading the chat sees them in Spanish.
+// Where the values of an answer come from, when they are not readings.
+const ORIGIN_LABELS = {
+	estimado: "estimado, sin sensor",
+	simulado: "simulado, el sensor no midió",
+	mixto: "medidos y estimados",
+};
+
 const INTENT_LABELS = {
 	current: "lectura actual",
 	forecast: "pronóstico",
@@ -223,7 +230,8 @@ $id("ask").addEventListener("submit", async (event) => {
 		if (about !== null && about !== undefined) {
 			const kind = INTENT_LABELS[answer.intent_type] ?? answer.intent_type;
 			appendSpan(pending, "meta", `${kind} • ${about}`
-				+ (answer.origin === "estimado" ? " • estimado, sin sensor" : "")
+				+ (answer.moment ? ` • ${answer.moment.slice(0, 16)}` : "")
+				+ (ORIGIN_LABELS[answer.origin] ? ` • ${ORIGIN_LABELS[answer.origin]}` : "")
 				+ (answer.forecast_method ? ` • ${answer.forecast_method}, ${answer.horizon_min} min` : ""));
 		}
 		if (answer.warning) appendSpan(pending, "warning", answer.warning);

@@ -84,14 +84,21 @@ TEMPLATES: dict[str, tuple[str, ...]] = {
         "El {asked} es el mismo salón que el {label}, y ese todavía no tiene "
         "sensor. Por ahora hay datos de {rooms}.",
     ),
-    "estimate_note": (
+    "estimado_note": (
         "{alias}Valores estimados: {subject} no tiene sensor. Salen del generador "
-        "físico, calibrado con {rooms}. Error esperado: {error}.",
+        "físico, calibrado con {rooms}. Error típico: {error}.",
     ),
-    "estimate_no_forecast": (
-        "{subject} no tiene sensor, y el pronóstico del GRU solo existe para los "
-        "salones medidos. Lo que sí te puedo dar es una estimación de cómo está "
-        "ahora o de cómo estuvo en el último día.",
+    "estimado_sensor_note": (
+        "{alias}Valores estimados: el sensor {of_subject} no tiene datos suficientes. "
+        "Salen del generador físico, calibrado con {rooms}. Error típico: {error}.",
+    ),
+    "simulado_note": (
+        "{alias}Valores simulados: el sensor {of_subject} no midió ese momento. Salen "
+        "del generador físico, calibrado con sus propias lecturas. Error típico: {error}.",
+    ),
+    "no_data_moment": (
+        "No tengo datos {of_subject} para ese momento. De ahí hay medido {measured}, "
+        "y generado {generated}.",
     ),
     "estimate_no_anomaly": (
         "{subject} no tiene sensor, y las anomalías solo se buscan en lecturas "
@@ -159,29 +166,43 @@ def capitalized(label: str) -> str:
     return named[:1].upper() + named[1:]
 
 
-def estimate_note(label: str, aliases: list[str], rooms: list[str], error: str, question: str) -> str:
-    """The note the code adds after an estimated answer.
+def origin_note(
+    origin: str, label: str, aliases: list[str], rooms: list[str], error: str, question: str,
+    has_sensor: bool = False,
+) -> str:
+    """The note the code adds after an answer built from generated values.
 
-    It says the values are estimated, what they come from and how far off
-    they can be. The model is asked to say so too, but this note is written
-    by the code, so it is there even when the model forgets.
+    It says whether they are estimated (no sensor) or simulated (the sensor
+    did not measure that moment), what they come from and how far off they
+    can be. The model is asked to say so too, but this note is written by
+    the code, so it is there even when the model forgets.
 
     Args:
+        origin: "estimado" or "simulado".
         label: How the space is called.
         aliases: Other numbers it is known by.
-        rooms: Labels of the measured rooms its type was calibrated with.
+        rooms: Labels of the measured rooms the parameters came from.
         error: The expected error, already written ("CO₂ ±190 ppm, ...").
         question: The question as typed.
+        has_sensor: For an estimate, whether the space has a sensor without
+            enough data (the 3304) rather than none.
 
     Returns:
         A sentence for the user.
     """
     asked = asked_alias(label, aliases, question)
     alias = f"El {asked} es el mismo salón que el {label}. " if asked else ""
+    kind = "estimado_sensor" if origin == "estimado" and has_sensor else origin
     return reply(
-        "estimate_note", question, alias=alias, subject=with_article(label),
-        rooms=spoken_list(rooms), error=error,
+        f"{kind}_note", question, alias=alias, subject=with_article(label),
+        of_subject=of_label(label), rooms=spoken_list(rooms), error=error,
     )
+
+
+def of_label(label: str) -> str:
+    """Put "del" or "de la" before a space label: "del 3308", "de la sala de juntas 1"."""
+    named = with_article(label)
+    return "de " + named if named.startswith("la ") else "d" + named
 
 
 def with_article(label: str) -> str:
