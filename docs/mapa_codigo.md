@@ -240,9 +240,9 @@ aulas3.parquet ─► data.preprocess ─► tramos continuos, rejilla de 5 min,
    perfecta; si la red no la aprende, hay un error en el código.
 
 6. **[src/gru/predict.py](../src/gru/predict.py).** El que usa la API.
-   - `load_model` (línea 63): carga pesos, normalizador y metadatos.
-   - `last_contiguous_window` (línea 297): busca la última hora sin huecos.
-   - `predict` (línea 333): directo si son 30 min o menos; si son más, repite:
+   - `load_model` (línea 64): carga pesos, normalizador y metadatos.
+   - `last_contiguous_window` (línea 282): busca la última hora sin huecos.
+   - `predict` (línea 318): directo si son 30 min o menos; si son más, repite:
      predice 30 min, los agrega a la ventana y vuelve a predecir.
 
 7. **[src/sarimax/model.py](../src/sarimax/model.py)** y
