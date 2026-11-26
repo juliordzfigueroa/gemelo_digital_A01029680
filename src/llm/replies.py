@@ -119,9 +119,13 @@ def spoken_list(items: list[str]) -> str:
     return f"{', '.join(items[:-1])} y {items[-1]}"
 
 
+# Labels that take "la": "la oficina mentores", "la sala de juntas 1".
+FEMININE_LABELS = ("oficina", "sala")
+
+
 def with_article(label: str) -> str:
-    """Put the right article before a space label: "el 3309", "la oficina 4-1"."""
-    return f"la {label}" if label.startswith("oficina") else f"el {label}"
+    """Put the right article before a space label: "el 3309", "la sala de juntas 1"."""
+    return f"la {label}" if label.startswith(FEMININE_LABELS) else f"el {label}"
 
 
 def unknown_room(
@@ -156,7 +160,7 @@ def no_sensor(label: str, aliases: list[str], rooms: list[str], question: str) -
     """Say that a registered space has no readings, and which spaces do.
 
     Args:
-        label: How the space is called ("3301", "oficina 4-1").
+        label: How the space is called ("3301", "sala de juntas 1").
         aliases: Other numbers it is known by, from the registry.
         rooms: Labels of the spaces that do have readings.
         question: The question as typed. When it named the space by another
@@ -171,9 +175,11 @@ def no_sensor(label: str, aliases: list[str], rooms: list[str], question: str) -
             asked = alias
             break
 
+    # Room numbers go bare in a list ("3206, 3208"); names take their article
+    # ("y la oficina mentores").
     named_rooms = []
     for room in rooms:
-        named_rooms.append(with_article(room) if room.startswith("oficina") else room)
+        named_rooms.append(room if room.isdigit() else with_article(room))
     listed = spoken_list(named_rooms)
 
     if asked:

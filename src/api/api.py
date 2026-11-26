@@ -209,16 +209,19 @@ def get_spaces() -> dict:
     """List the floors and spaces the viewer draws, with their latest reading.
 
     Returns:
-        The scan server address, the floor clouds, and every space with its
-        marker, dimensions and latest reading (empty when it has no sensor).
+        The scan server address, the floor clouds, and every space with the
+        name to show, its marker, dimensions and latest reading (empty when
+        it has no sensor).
     """
     registry = spaces.read()
+    labels = spaces.labels()
     output = []
     for space in registry["spaces"]:
         current = ret.current_data(int(space["space_id"]))
         output.append({
             "space_id": space["space_id"],
             "name": space["name"],
+            "label": labels[int(space["space_id"])],
             "room": space.get("room"),
             "floor": space["floor"],
             "kind": space["kind"],

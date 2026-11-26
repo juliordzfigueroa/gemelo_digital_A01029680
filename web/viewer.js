@@ -141,7 +141,7 @@ function fillSpaces() {
 		const option = document.createElement("option");
 		option.value = space.space_id;
 		const sensor = Object.keys(space.readings).length ? " • con sensor" : "";
-		option.textContent = `${space.room ?? space.name} (piso ${space.floor})${sensor}`;
+		option.textContent = `${space.label ?? space.name} (piso ${space.floor})${sensor}`;
 		select.append(option);
 	}
 	select.addEventListener("change", () => select.value && selectSpace(Number(select.value)));
@@ -161,7 +161,7 @@ function drawMarkers() {
 		if (!marker) continue;
 		const a = new Potree.Annotation({
 			position: marker,
-			title: space.room ?? space.name,
+			title: space.label ?? space.name,
 			description: describe(space),
 		});
 		a.addEventListener("click", () => (SURVEY_MODE ? selectSpace : highlightMarker)(space.space_id));
@@ -217,7 +217,7 @@ $id("ask").addEventListener("submit", async (event) => {
 		const isFloor = answer.floor !== null && answer.floor !== undefined;
 		const about = answer.building ? "todo el edificio"
 			: isFloor ? (answer.floor === 0 ? "planta baja" : `piso ${answer.floor}`)
-			: (room?.room ?? room?.name ?? answer.space);
+			: (room?.label ?? room?.name ?? answer.space);
 		// No meta line when the API answered without routing (help, which
 		// room, unknown room).
 		if (about !== null && about !== undefined) {

@@ -13,8 +13,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Initial implementation, gathered from the API and the
-    classifier.
+    2026-11-26 - Spaces without a room number take their "label".
 
 Reference:
     Section 4.3.4 of the research document.
@@ -39,10 +38,11 @@ def read() -> dict:
 def labels() -> dict[int, str]:
     """Return the name a person uses for each space.
 
-    The room number when there is one ("3308"). Spaces without one, like the
-    open offices of floor 4, get a readable name built from the registry name
-    ("space_4_2" becomes "oficina 4-2"). Answers use these instead of ids, so
-    they never say "espacio 5" or "space_4_2".
+    The room number when there is one ("3308"); otherwise the "label" of the
+    registry, which the offices and meeting rooms of floor 4 carry ("oficina
+    mentores"). A space with neither gets a name built from the registry name
+    ("space_4_2" would become "espacio 4-2"). Answers use these instead of
+    ids, so they never say "espacio 5" or "space_4_2".
 
     Returns:
         A dict from space id to its label.
@@ -51,12 +51,11 @@ def labels() -> dict[int, str]:
     for space in read()["spaces"]:
         if space.get("room"):
             label = space["room"]
+        elif space.get("label"):
+            label = space["label"]
         else:
             number = space["name"].removeprefix("space_").replace("_", "-")
-            if space.get("kind") == "open_office":
-                label = f"oficina {number}"
-            else:
-                label = f"espacio {number}"
+            label = f"espacio {number}"
         output[int(space["space_id"])] = label
     return output
 
@@ -66,13 +65,16 @@ def names() -> dict[int, list[str]]:
 
     Returns:
         A dict from space id to its lowercase names, longest first: the
-        registry name, the room number and every alias.
+        registry name, the room number or label, and every alias. Every name
+        an answer shows can also be typed.
     """
     output = {}
     for space in read()["spaces"]:
         words = {space["name"], *space.get("alias", [])}
         if space.get("room"):
             words.add(space["room"])
+        if space.get("label"):
+            words.add(space["label"])
         output[int(space["space_id"])] = sorted(
             {str(w).lower() for w in words if w}, key=len, reverse=True
         )
