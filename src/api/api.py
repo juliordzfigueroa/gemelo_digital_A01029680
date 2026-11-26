@@ -44,7 +44,7 @@ from common import config as cfg
 from common import data as dat
 from common import spaces
 from gru import predict as pred
-from llm import classifier, context, llm_client, replies
+from llm import classifier, context, floor_prompt, llm_client, replies
 
 # Default span for a historical question when the user names no period.
 HISTORY_HOURS = 24
@@ -224,7 +224,7 @@ def _history_data(
         "summary": {
             "max": _number(series.max()) if len(series) else None,
             "min": _number(series.min()) if len(series) else None,
-            "promedio": _number(series.mean()) if len(series) else None,
+            "mean": _number(series.mean()) if len(series) else None,
             "n_readings": int(len(series)),
         },
     }
@@ -461,7 +461,7 @@ def _floor_data(intent: classifier.Intent, floor: int | None) -> dict:
         variable = variables[0]
         maxima = [(r["summary"]["max"], r["room"]) for r in summaries if r["summary"].get("max") is not None]
         minima = [(r["summary"]["min"], r["room"]) for r in summaries if r["summary"].get("min") is not None]
-        means = [r["summary"]["promedio"] for r in summaries if r["summary"].get("promedio") is not None]
+        means = [r["summary"]["mean"] for r in summaries if r["summary"].get("mean") is not None]
         data["summary"] = {variable: {
             "max": max(maxima)[0] if maxima else None,
             "max_room": max(maxima)[1] if maxima else None,
@@ -783,7 +783,7 @@ def chat(question: Question) -> Answer:
         # missing than by an error the viewer has to interpret.
         response = f"No puedo responder ahora mismo. {e}"
     else:
-        detail = context.floor_detail(data) if data.get("scope") else ""
+        detail = floor_prompt.detail(data) if data.get("scope") else ""
         if detail:
             response = f"{response.rstrip()}\n\n{detail}"
 
