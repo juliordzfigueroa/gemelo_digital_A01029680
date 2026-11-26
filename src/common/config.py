@@ -10,7 +10,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Added SENSORS_FILE so ingestion takes every path from here.
+    2026-11-26 - Added SENSORS_FILE and MAX_HORIZON_MIN, each used in two
+    modules.
 
 Reference:
     Section 4.2.6 of the research document.
@@ -115,6 +116,13 @@ BINARY = {"motion"}
 INTERVAL_SECONDS = 300  # data aggregated to 5-minute buckets
 INPUT_STEPS = 12  # 1 hour of context
 OUTPUT_STEPS = 6  # 30 minutes predicted per direct invocation
+
+# Longest forecast served, by repeating the direct one. Beyond two hours the
+# compounded error makes the output not worth reporting. The classifier caps
+# the horizon a question asks for at this value; gru.predict refuses more.
+#
+# Reference: Section 4.2.6 of the research document.
+MAX_HORIZON_MIN = 120
 
 # Gaps up to this many steps are interpolated; anything longer splits the
 # block. Windows never cross a block boundary.

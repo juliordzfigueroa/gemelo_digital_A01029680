@@ -16,7 +16,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-03 - Read the Ollama address from common.config.
+    2026-11-26 - Removed parameters no caller passed; the constants above
+    are the settings.
 
 Reference:
     Section 4.3.3 of the research document.
@@ -52,23 +53,15 @@ TEMPERATURE = 0.2
 MAX_TOKENS = 300
 
 
-def generate_answer(
-    system_prompt: str,
-    user_prompt: str,
-    model: str = MODEL,
-    temperature: float = TEMPERATURE,
-    max_tokens: int = MAX_TOKENS,
-    timeout: float = TIMEOUT_S,
-) -> str:
+def generate_answer(system_prompt: str, user_prompt: str) -> str:
     """Send both prompts to Ollama and return the generated text.
+
+    Uses MODEL, TEMPERATURE, MAX_TOKENS and TIMEOUT_S from the top of this
+    file.
 
     Args:
         system_prompt: Role and constraints, from llm.context.SYSTEM_PROMPT.
         user_prompt: The question plus the retrieved data.
-        modelo: Ollama model tag.
-        temperatura: Sampling temperature.
-        max_tokens: Upper bound on generated tokens.
-        timeout: Seconds to wait for the whole response.
 
     Returns:
         The generated text, stripped.
@@ -79,17 +72,17 @@ def generate_answer(
             Every message names the command that fixes it.
     """
     payload = {
-        "model": model,
+        "model": MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
-        "options": {"temperature": temperature, "num_predict": max_tokens},
+        "options": {"temperature": TEMPERATURE, "num_predict": MAX_TOKENS},
     }
 
     try:
-        response = httpx.post(CHAT_URL, json=payload, timeout=timeout)
+        response = httpx.post(CHAT_URL, json=payload, timeout=TIMEOUT_S)
         response.raise_for_status()
     except httpx.ConnectError as e:
         raise RuntimeError(
@@ -99,15 +92,15 @@ def generate_answer(
         ) from e
     except httpx.TimeoutException as e:
         raise RuntimeError(
-            f"Ollama no respondió en {timeout:.0f} s. La primera llamada "
+            f"Ollama no respondió en {TIMEOUT_S:.0f} s. La primera llamada "
             "después de encender la máquina carga el modelo en VRAM y puede "
             "tardar; vuelve a intentar."
         ) from e
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
             raise RuntimeError(
-                f"Ollama no tiene el modelo '{model}'. Descárgalo con "
-                f"`ollama pull {model}`"
+                f"Ollama no tiene el modelo '{MODEL}'. Descárgalo con "
+                f"`ollama pull {MODEL}`"
             ) from e
         raise RuntimeError(
             f"Ollama devolvió HTTP {e.response.status_code}: "
@@ -121,15 +114,12 @@ def generate_answer(
         raise RuntimeError(f"Respuesta inesperada de Ollama: {data}") from e
 
 
-def available(model: str = MODEL) -> tuple[bool, str]:
-    """Check whether Ollama is reachable and the model is installed.
+def available() -> tuple[bool, str]:
+    """Check whether Ollama is reachable and MODEL is installed.
 
     Used by the API health check, so it has to answer fast and never raise:
     a health endpoint that hangs or crashes is worse than one that reports a
     problem.
-
-    Args:
-        modelo: Model tag to look for.
 
     Returns:
         A tuple of (ready, human-readable reason). When ready is True the
@@ -149,19 +139,19 @@ def available(model: str = MODEL) -> tuple[bool, str]:
     except (AttributeError, KeyError, TypeError):
         return False, "Ollama respondió algo que no se pudo interpretar"
 
-    if model in installed:
-        return True, f"Ollama listo con {model}"
+    if MODEL in installed:
+        return True, f"Ollama listo con {MODEL}"
 
     # Ollama reports tags as "llama3.1:8b"; accept a bare family match so a
     # differently tagged build of the same model still counts as present.
-    family = model.split(":")[0]
+    family = MODEL.split(":")[0]
     similar = [m for m in installed if m.split(":")[0] == family]
     if similar:
-        return True, f"Ollama listo con {similar[0]} (se pidió {model})"
+        return True, f"Ollama listo con {similar[0]} (se pidió {MODEL})"
 
     return False, (
-        f"Ollama corre pero no tiene '{model}'. Descárgalo con "
-        f"`ollama pull {model}`. Instalados: {installed or 'ninguno'}"
+        f"Ollama corre pero no tiene '{MODEL}'. Descárgalo con "
+        f"`ollama pull {MODEL}`. Instalados: {installed or 'ninguno'}"
     )
 
 

@@ -500,7 +500,7 @@ Qué está conectado y qué no:
 |---|---|
 | GRU, predicción directa e iterativa | real, desde `models/gru.pt` |
 | Clasificación de la pregunta y prompts | real |
-| Fuente de datos | archivo limpio `aulas3.parquet`; la base de datos del Tec queda pendiente (`TODO E5` en `api/api.py`) |
+| Fuente de datos | archivo limpio `aulas3.parquet`; la base de datos del Tec queda pendiente (`TODO E5` en `api/retrieval.py`) |
 | Detector de anomalías | **no existe**; la API lo dice en vez de responder que no hay nada |
 
 Diseño de esta capa en [src/llm/README.md](src/llm/README.md).
@@ -726,11 +726,11 @@ cuando un nodo pierde la red.
 ## Estructura
 
 ```
-src/common/        contrato de datos, ventanas, normalización, métricas
+src/common/        contrato de datos, ventanas, normalización, métricas, registro de salones
 src/gru/          modelo, entrenamiento y predicción
 src/sarimax/      baseline estadístico
-src/llm/          clasificador, prompts y cliente de Ollama
-src/api/          orquestador FastAPI; también sirve el visor
+src/llm/          clasificador y vocabulario, prompts, frases fijas, cliente de Ollama
+src/api/          orquestador FastAPI y recuperación de datos; también sirve el visor
 src/scans/        alineación y conversión de escaneos, servidor de nubes
 web/              página del visor Potree (la librería, en web/potree/, no se versiona)
 src/compare_models.py   GRU contra SARIMAX

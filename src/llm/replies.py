@@ -19,7 +19,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-09 - Initial implementation.
+    2026-11-26 - The unknown-room and no-sensor sentences moved here from
+    the API.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -116,3 +117,66 @@ def spoken_list(items: list[str]) -> str:
     if len(items) <= 1:
         return "".join(items)
     return f"{', '.join(items[:-1])} y {items[-1]}"
+
+
+def with_article(label: str) -> str:
+    """Put the right article before a space label: "el 3309", "la oficina 4-1"."""
+    return f"la {label}" if label.startswith("oficina") else f"el {label}"
+
+
+def unknown_room(
+    number: str, question: str, floor_spaces: dict[int, list[int]], labels: dict[int, str]
+) -> str:
+    """Say that a room number is not in the registry, and what is.
+
+    Args:
+        number: The four-digit number from the question.
+        question: The question as typed, to pick the wording.
+        floor_spaces: Space ids by floor, from the registry.
+        labels: Label of every space, from the registry.
+
+    Returns:
+        A sentence for the user.
+    """
+    if not number.startswith("3"):
+        return reply("unknown_room_other_building", question, number=number)
+
+    floor = int(number[1])
+    if floor not in floor_spaces:
+        return reply(
+            "unknown_room_no_floor", question, number=number, top_floor=max(floor_spaces)
+        )
+
+    known = spoken_list([str(labels[s]) for s in sorted(floor_spaces[floor])])
+    where = "la planta baja" if floor == 0 else f"el piso {floor}"
+    return reply("unknown_room_floor", question, number=number, where=where, known=known)
+
+
+def no_sensor(label: str, aliases: list[str], rooms: list[str], question: str) -> str:
+    """Say that a registered space has no readings, and which spaces do.
+
+    Args:
+        label: How the space is called ("3301", "oficina 4-1").
+        aliases: Other numbers it is known by, from the registry.
+        rooms: Labels of the spaces that do have readings.
+        question: The question as typed. When it named the space by another
+            number (the 3302 is the 3301), the answer says so.
+
+    Returns:
+        A sentence for the user.
+    """
+    asked = None
+    for alias in aliases:
+        if alias != label and alias.isdigit() and alias in question.lower():
+            asked = alias
+            break
+
+    named_rooms = []
+    for room in rooms:
+        named_rooms.append(with_article(room) if room.startswith("oficina") else room)
+    listed = spoken_list(named_rooms)
+
+    if asked:
+        return reply("no_sensor_alias", question, asked=asked, label=label, rooms=listed)
+    named = with_article(label)
+    return reply("no_sensor", question, subject=named[:1].upper() + named[1:], rooms=listed)

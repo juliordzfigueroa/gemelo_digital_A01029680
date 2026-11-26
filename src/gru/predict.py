@@ -50,12 +50,6 @@ from common import config as cfg
 from common.data import Normalizer, add_time_features
 from gru import model as mod
 
-# Longest horizon the iterative mode will produce. Beyond two hours the
-# compounded error makes the output not worth reporting.
-#
-# Reference: Section 4.2.6 of the research document.
-MAX_HORIZON_MIN = 120
-
 # Minutes per step, derived from the sampling interval rather than hard-coded
 # so that changing the interval in config.py cannot desynchronize this module.
 MINUTES_PER_STEP = cfg.INTERVAL_SECONDS // 60
@@ -334,7 +328,7 @@ def predict(
             units, with the timestamp column. The timestamps are what let the
             iterative mode know the real time of day of each predicted step.
         space_id: Space identifier as it appears in the data.
-        horizon_min: Minutes ahead, a multiple of 5 up to MAX_HORIZON_MIN.
+        horizon_min: Minutes ahead, a multiple of 5 up to cfg.MAX_HORIZON_MIN.
         device: "cuda", "cpu" or None to autodetect.
 
     Returns:
@@ -349,10 +343,10 @@ def predict(
         ValueError: If the horizon is out of range or not a multiple of the
             sampling interval, or if the window is malformed.
     """
-    if horizon_min <= 0 or horizon_min > MAX_HORIZON_MIN:
+    if horizon_min <= 0 or horizon_min > cfg.MAX_HORIZON_MIN:
         raise ValueError(
             f"horizon_min must be between {MINUTES_PER_STEP} and "
-            f"{MAX_HORIZON_MIN}, got {horizon_min}"
+            f"{cfg.MAX_HORIZON_MIN}, got {horizon_min}"
         )
     if horizon_min % MINUTES_PER_STEP != 0:
         raise ValueError(
