@@ -10,7 +10,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-25 - Removed options nobody used (implementation, split mode).
+    2026-11-26 - Added SENSORS_FILE so ingestion takes every path from here.
 
 Reference:
     Section 4.2.6 of the research document.
@@ -37,6 +37,9 @@ WEATHER_DATA = PROCESSED_DATA / "weather.parquet"
 # Shared space registry: names for the classifier, floor clouds and markers
 # for the viewer.
 SPACES_FILE = ROOT / "config" / "spaces.json"
+
+# Which device sat in which space, and since when. Read by ingestion.cleaning.
+SENSORS_FILE = ROOT / "config" / "sensors.csv"
 VIEWER_DIR = ROOT / "web"
 
 # --- Services ----------------------------------------------------------------

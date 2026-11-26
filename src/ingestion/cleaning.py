@@ -2,7 +2,7 @@
 
 Turns the CSV the ESP32 nodes produce into the frame every model in this
 repository expects: one row per space and 5-minute interval, with co2,
-temperatura, humedad, luz and movimiento. It accepts several files at once,
+temperature, humidity, light and motion. It accepts several files at once,
 because exports arrive week by week and overlap, and writes a report of every
 reading it discarded and why, so the cleaning can be audited in the thesis
 instead of taken on trust.
@@ -18,8 +18,8 @@ Decisions that are not obvious from the code:
     estimates from volatile compounds, not a measured NDIR value. It rises
     with cleaning products and markers, and stays above 1,000 ppm on weekends
     with no motion. Downstream code must not treat it as true CO2.
-  - `lightPercent` becomes `luz` in percent (0-100), not lux.
-  - Movement becomes the fraction of readings in the interval that saw motion,
+  - `lightPercent` becomes `light` in percent (0-100), not lux.
+  - Motion becomes the fraction of readings in the interval that saw motion,
     a value in [0, 1]. Keeping a single 0/1 per interval would discard almost
     everything: the PIR fires in 1.6-3.6% of weekday readings even in full
     classrooms.
@@ -30,7 +30,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Initial implementation.
+    2026-11-26 - Paths from config.py, simpler invalidation, fixed stale names.
 
 Reference:
     Section 4.2.6 of the research document; data contract in config.py.
@@ -46,8 +46,6 @@ import numpy as np
 import pandas as pd
 
 from common import config as cfg
-
-CONFIG_DIR = cfg.ROOT / "config"
 
 # Raw column -> contract column. Anything not listed here is dropped.
 COLUMNS = {
@@ -74,10 +72,10 @@ def read_raw(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
     """Read one or more raw exports and merge them.
 
     Args:
-        rutas: CSV files exported from the sensor platform.
+        paths: CSV files exported from the sensor platform.
 
     Returns:
-        A tuple of (frame with deviceId, tiempo and the five raw variables,
+        A tuple of (frame with deviceId, ts and the five raw variables,
         partial report). Exact repeats of the same device and second, which
         appear when exports overlap, are kept only once.
 
@@ -109,11 +107,11 @@ def read_raw(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
     }
 
 
-def load_sensors(path: Path = CONFIG_DIR / "sensors.csv") -> pd.DataFrame:
+def load_sensors(path: Path = cfg.SENSORS_FILE) -> pd.DataFrame:
     """Load the device-to-space table.
 
     Args:
-        ruta: CSV with dispositivo, space_id, desde and hasta.
+        path: CSV with device, space_id, since and until.
 
     Returns:
         The table with parsed dates. Empty dates mean an open interval.
@@ -136,7 +134,7 @@ def assign_spaces(
 
     Args:
         df: Output of read_raw().
-        sensores: Output of load_sensors().
+        sensors: Output of load_sensors().
 
     Returns:
         A tuple of (readings with an integer space_id, count of discarded
@@ -174,10 +172,10 @@ def invalidate(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
     Three rules, each counted separately so the report says which one fired:
 
-      - centinela: the sensor's own error code, -1.
-      - lectura_vacia: temperature and humidity both exactly 0, the signature
+      - sentinel: the sensor's own error code, -1.
+      - empty_reading: temperature and humidity both exactly 0, the signature
         of a failed read on this kind of sensor rather than a real reading.
-      - fuera_de_rango: outside the instrument limits in config.PHYSICAL_LIMITS.
+      - out_of_range: outside the instrument limits in config.PHYSICAL_LIMITS.
 
     Only the affected variable is blanked; the rest of the reading survives.
 
@@ -191,13 +189,10 @@ def invalidate(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     counts: dict = {}
 
     def mark(mask: pd.Series, variable: str, rule: str) -> None:
+        # Count per device before blanking, so the report says what was lost.
         for device, n in df.loc[mask, "deviceId"].value_counts().items():
-            (
-                counts.setdefault(device, {})
-                .setdefault(variable, {})
-                .setdefault(rule, 0)
-            )
-            counts[device][variable][rule] += int(n)
+            rules = counts.setdefault(device, {}).setdefault(variable, {})
+            rules[rule] = rules.get(rule, 0) + int(n)
         df.loc[mask, variable] = np.nan
 
     for variable in cfg.ACTIVE_VARIABLES:
@@ -209,12 +204,10 @@ def invalidate(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
     for variable in cfg.ACTIVE_VARIABLES:
         lower, upper = cfg.PHYSICAL_LIMITS[variable]
-        outside = pd.Series(False, index=df.index)
-        if lower is not None:
-            outside |= df[variable] < lower
-        if upper is not None:
-            outside |= df[variable] > upper
-        mark(outside & df[variable].notna(), variable, "out_of_range")
+        # A missing value compares as False on both sides, so values already
+        # blanked by the rules above are not counted twice.
+        outside = (df[variable] < lower) | (df[variable] > upper)
+        mark(outside, variable, "out_of_range")
 
     return df, counts
 
@@ -227,7 +220,7 @@ def aggregate(df: pd.DataFrame) -> pd.DataFrame:
     Intervals are labelled by their start.
 
     Args:
-        df: Cleaned readings carrying space_id and tiempo.
+        df: Cleaned readings carrying space_id and ts.
 
     Returns:
         One row per space and interval, satisfying the data contract. Rows
@@ -249,11 +242,37 @@ def aggregate(df: pd.DataFrame) -> pd.DataFrame:
     return output[[cfg.TIME_COLUMN, cfg.SPACE_COLUMN, *cfg.ACTIVE_VARIABLES]]
 
 
+def space_summary(contract: pd.DataFrame) -> dict:
+    """Describe what each space ended up with after cleaning.
+
+    Args:
+        contract: Output of aggregate().
+
+    Returns:
+        A dict from space id, as text for JSON, to its date range, how many
+        intervals it has, how many are complete and the gaps per variable.
+    """
+    summary = {}
+    for space, group in contract.groupby(cfg.SPACE_COLUMN):
+        complete = int(group[cfg.ACTIVE_VARIABLES].notna().all(axis=1).sum())
+        summary[str(space)] = {
+            "since": str(group[cfg.TIME_COLUMN].min()),
+            "until": str(group[cfg.TIME_COLUMN].max()),
+            "intervals": int(len(group)),
+            "complete_intervals": complete,
+            "complete_hours": round(complete * cfg.INTERVAL_SECONDS / 3600, 1),
+            "missing_by_variable": {
+                v: int(group[v].isna().sum()) for v in cfg.ACTIVE_VARIABLES
+            },
+        }
+    return summary
+
+
 def clean(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
     """Run the whole cleaning, from raw exports to the data contract.
 
     Args:
-        rutas: Raw CSV exports.
+        paths: Raw CSV exports.
 
     Returns:
         A tuple of (contract frame, full report).
@@ -272,21 +291,7 @@ def clean(paths: list[Path]) -> tuple[pd.DataFrame, dict]:
     report["invalidated_values"] = invalid
 
     contract = aggregate(cleaned)
-
-    summary = {}
-    for space, group in contract.groupby(cfg.SPACE_COLUMN):
-        complete_rows = group[cfg.ACTIVE_VARIABLES].notna().all(axis=1)
-        summary[str(space)] = {
-            "since": str(group[cfg.TIME_COLUMN].min()),
-            "until": str(group[cfg.TIME_COLUMN].max()),
-            "intervals": int(len(group)),
-            "complete_intervals": int(complete_rows.sum()),
-            "complete_hours": round(float(complete_rows.sum()) * cfg.INTERVAL_SECONDS / 3600, 1),
-            "missing_by_variable": {
-                v: int(group[v].isna().sum()) for v in cfg.ACTIVE_VARIABLES
-            },
-        }
-    report["by_space"] = summary
+    report["by_space"] = space_summary(contract)
     report["notes"] = [
         "co2 es eCO2 estimado por un sensor MOX, no CO2 medido (NDIR).",
         "luz esta en porcentaje (0-100), no en lux.",
@@ -300,7 +305,7 @@ def print_report(report: dict) -> None:
     """Print the parts of the report worth reading in the terminal.
 
     Args:
-        reporte: Report returned by clean().
+        report: Report returned by clean().
     """
     print(f"Archivos: {', '.join(report['files'])}")
     print(
@@ -343,7 +348,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=cfg.PROCESSED_DATA / "aulas3.parquet",
+        default=cfg.REAL_DATA,
         help="where to write the contract frame",
     )
     args = parser.parse_args()
