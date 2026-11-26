@@ -1,47 +1,26 @@
 """SARIMAX baseline: one univariate model per space and variable.
 
 This is the statistical yardstick of section 4.2.5, not a component of the GRU.
-The two models are trained independently, by different criteria, and only their
-predictions meet, on the same test split and through the same metrics:
+Where the GRU is one global model for every space and variable, SARIMAX needs
+one fit per variable and space. compare_models.py explains why nothing passes
+from one to the other.
 
-    GRU      minimizes MSE by backpropagation, updating weights step by step.
-    SARIMAX  maximizes likelihood through a Kalman filter, solving for its
-             coefficients in one go.
-
-There is no loss value that can travel from one to the other, and forcing one
-would be counterproductive: training the GRU to match SARIMAX's output would
-cap it at SARIMAX's accuracy, which defeats the purpose of having a baseline to
-beat.
-
-SARIMAX is also univariate, so a model for 5 variables across 5 spaces means 25
-independent fits. That is the second structural difference from the GRU, which
-is a single global model.
-
-On seasonality. Section 4.2.7.1 states a seasonal period of s=288, which is one
-day at 5-minute sampling. That is correct in principle and intractable in
-practice: the state-space representation grows with s, so a seasonal term of
-288 drags a 289-dimensional state through every Kalman step. Measured on the
-project data, that was 2147 seconds for a single model against 0.82 seconds
-for the Fourier alternative, a factor of 2600, and 25 models are needed. The
-seasonal mode was removed after that measurement; the numbers are kept in
-src/sarimax/README.md.
-
-The Fourier approach uses a part of the same equation that is already there.
-Instead of asking the model to look 288 steps back, sine and cosine terms with
-a period of 288 enter through the exogenous term, which the general equation
-already carries as sum(beta_i X_i,t). It captures the same daily periodicity
-with 2K regressors instead of 289 state dimensions.
+The daily cycle enters as sine and cosine terms through the exogenous part of
+the general equation, sum(beta_i X_i,t), instead of the seasonal period s=288
+of section 4.2.7.1. Same daily periodicity, but with 2K regressors instead of a
+289-dimensional state: measured, 0.82 s per model against 2147 s. The full
+measurement is in src/sarimax/README.md.
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-25 - Kept only the Fourier mode and removed unused helpers.
+    2026-11-26 - Shortened this docstring; AIC is read straight from the fit.
 
 Reference:
     Section 4.2.7.1 of the research document.
-    Hyndman, R. J., & Koehler, A. B. (2006). Another look at measures of
-    forecast accuracy. International Journal of Forecasting, 22(4), 679-688.
+    Hyndman, R. J., & Athanasopoulos, G. (2021). Forecasting: principles and
+    practice (3rd ed.), section 10.5, dynamic harmonic regression. OTexts.
 """
 
 from __future__ import annotations
@@ -109,7 +88,7 @@ class BaselineSARIMAX:
         """
         # statsmodels warns loudly about non-invertible starting parameters and
         # about convergence on series this long. Neither is actionable here and
-        # both would bury the output across 25 fits.
+        # both would bury the output across every fit.
         #
         # Stationarity is enforced because d=0 assumes it. On the real sensor
         # data, temperature and humidity are persistent enough at 5 minutes
@@ -169,8 +148,3 @@ class BaselineSARIMAX:
             )
             output[row] = prediction.predicted_mean
         return output
-
-    @property
-    def aic(self) -> float:
-        """Akaike information criterion of the fit, or nan before fitting."""
-        return float(self.result.aic) if self.result is not None else float("nan")

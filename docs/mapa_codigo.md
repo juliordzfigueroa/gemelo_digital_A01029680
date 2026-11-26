@@ -185,8 +185,9 @@ tiene un vector de 8 números que la red aprende y que le dice "este es el
 3308". Es lo que deja que un modelo global se comporte distinto por salón.
 
 **SARIMAX.** El modelo estadístico de comparación. Uno por variable y salón
-(25 en total), con el ciclo diario como senos y cosenos (términos de Fourier).
-Se evalúa sobre exactamente las mismas ventanas que el GRU.
+con ventanas de prueba (hoy 20: 5 variables × 4 salones), con el ciclo diario
+como senos y cosenos (términos de Fourier). Se evalúa sobre exactamente las
+mismas ventanas que el GRU.
 
 ### Cómo viaja todo
 
@@ -199,7 +200,7 @@ aulas3.parquet ─► data.preprocess ─► tramos continuos, rejilla de 5 min,
        │                                                 predict.py ◄──────┘ (lo usa la API)
        │
        └─ SARIMAX: sarimax/train.py ─► las mismas EnvironmentalWindows, en unidades físicas
-                                       ─► 25 modelos ─► mismas métricas (common/metrics.py)
+                                       ─► 20 modelos ─► mismas métricas (common/metrics.py)
 ```
 
 ### Orden de lectura
@@ -247,12 +248,12 @@ aulas3.parquet ─► data.preprocess ─► tramos continuos, rejilla de 5 min,
 
 7. **[src/sarimax/model.py](../src/sarimax/model.py)** y
    **[src/sarimax/train.py](../src/sarimax/train.py).**
-   - `fourier_terms` (model.py, línea 69): los senos y cosenos del ciclo
+   - `fourier_terms` (model.py, línea 48): los senos y cosenos del ciclo
      diario.
-   - `test_origins` (train.py, línea 65): pide las ventanas de prueba a la
-     misma clase del GRU.
-   - `fit_all` (train.py, línea 112): ajusta los 25 modelos y pronostica
-     cada ventana.
+   - `test_windows` (train.py, línea 66): pide las ventanas de prueba a la
+     misma clase del GRU; de ahí salen también las respuestas correctas.
+   - `fit_all` (train.py, línea 84): para cada salón, ajusta un modelo por
+     variable y pronostica sus ventanas.
 
 8. **[src/compare_models.py](../src/compare_models.py).** Corre los dos y
    pone los resultados lado a lado.
@@ -272,5 +273,6 @@ futuro (de prueba) desde antes de entrenar, y las métricas saldrían mejores de
 lo que son. 2) Un hueco de más de 15 minutos sin lecturas corta el tramo
 (`mark_blocks`), y ninguna ventana cruza un corte (`EnvironmentalWindows`). 3) La de la ecuación
 3: `r * h_prev` se multiplica antes de aplicar `W_h`. 4) SARIMAX construye la
-misma clase `EnvironmentalWindows` y usa sus `origins`. 5) Cuatro: cada pasada
+misma clase `EnvironmentalWindows`: de `origins` saca dónde pronosticar y de
+`y` la respuesta correcta. 5) Cuatro: cada pasada
 da 30 minutos.
