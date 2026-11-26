@@ -495,8 +495,8 @@ servidores Flask.
    (`available`, línea 117).
 
 9. **[src/common/spaces.py](../src/common/spaces.py).** El registro de
-   salones: `labels` (línea 39) convierte 308 en "3308" y `space_4_2` en
-   "oficina 4-2".
+   salones: `labels` (línea 38) convierte 308 en "3308" y 402 en "oficina
+   mentores", el `label` que tiene en `spaces.json`.
 
 10. **[src/anomaly/detector.py](../src/anomaly/detector.py)** y
     **[src/anomaly/evaluate.py](../src/anomaly/evaluate.py).** El detector de

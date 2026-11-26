@@ -1,5 +1,5 @@
 {
-  "_description": "Fuente única de espacios: la leen la limpieza, el clasificador, la API y el visor. space_id = piso*100 + número. Un espacio existe aunque no tenga sensor; qué sensor mide qué espacio vive en sensors.csv.",
+  "_description": "Fuente única de espacios: la leen la limpieza, el clasificador, la API y el visor. space_id = piso*100 + número. label es el nombre que se muestra y se puede escribir en el chat cuando el espacio no tiene número de salón (piso 4). Un espacio existe aunque no tenga sensor; qué sensor mide qué espacio vive en sensors.csv.",
   "_floors": "cloud es la ruta de la nube convertida, relativa a la raíz del servidor de escaneos (SCANS_DIR). transform lleva el LAS de cada piso al marco común del edificio (el de Aulas_3_Completo 1.e57): p = R(rotation_deg)·p_piso + (dx, dy), z sin cambio; lo aplica scans.transform y se midió registrando un corte horizontal de cada piso contra el combinado (residual_cm = error mediano). marker es [x, y, z] en ese marco común; dimensions es {length, width, height} en metros.",
   "_pending": "marker y dimensions de cada salón: se miden en el visor de Potree; tipos de pisos 0 y 1; el horario menciona S01_LAB, que no se incluyó porque no sigue la numeración.",
   "floors": [
@@ -346,10 +346,11 @@
       "floor": 4,
       "kind": "open_office",
       "room": null,
+      "label": "oficina 1",
       "alias": [],
       "marker": null,
       "dimensions": null,
-      "note": "Oficinas grandes casi abiertas; el piso 4 no tiene salones. Zona exacta de cada sensor por anotar."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
     },
     {
       "space_id": 402,
@@ -357,10 +358,130 @@
       "floor": 4,
       "kind": "open_office",
       "room": null,
+      "label": "oficina mentores",
+      "alias": [
+        "mentores",
+        "oficina de mentores"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "note": "Los dos sensores del piso 4 (esp32_room_01 y esp32_room_02) están en esta oficina. Conserva el id 402 porque es el que tienen sus lecturas y el GRU."
+    },
+    {
+      "space_id": 403,
+      "name": "space_4_3",
+      "floor": 4,
+      "kind": "open_office",
+      "room": null,
+      "label": "oficina 2",
       "alias": [],
       "marker": null,
       "dimensions": null,
-      "note": "Oficinas grandes casi abiertas; el piso 4 no tiene salones. Zona exacta de cada sensor por anotar."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+    },
+    {
+      "space_id": 404,
+      "name": "space_4_4",
+      "floor": 4,
+      "kind": "open_office",
+      "room": null,
+      "label": "oficina 3",
+      "alias": [],
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+    },
+    {
+      "space_id": 405,
+      "name": "space_4_5",
+      "floor": 4,
+      "kind": "meeting_room",
+      "room": null,
+      "label": "sala de juntas 1",
+      "alias": [],
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+    },
+    {
+      "space_id": 406,
+      "name": "space_4_6",
+      "floor": 4,
+      "kind": "meeting_room",
+      "room": null,
+      "label": "sala de juntas 2",
+      "alias": [],
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+    },
+    {
+      "space_id": 407,
+      "name": "space_4_7",
+      "floor": 4,
+      "kind": "meeting_room",
+      "room": null,
+      "label": "sala de juntas 3",
+      "alias": [],
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+    },
+    {
+      "space_id": 408,
+      "name": "space_4_8",
+      "floor": 4,
+      "kind": "one_on_one_room",
+      "room": null,
+      "label": "sala uno a uno 1",
+      "alias": [
+        "sala 1 a 1 1"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+    },
+    {
+      "space_id": 409,
+      "name": "space_4_9",
+      "floor": 4,
+      "kind": "one_on_one_room",
+      "room": null,
+      "label": "sala uno a uno 2",
+      "alias": [
+        "sala 1 a 1 2"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+    },
+    {
+      "space_id": 410,
+      "name": "space_4_10",
+      "floor": 4,
+      "kind": "one_on_one_room",
+      "room": null,
+      "label": "sala uno a uno 3",
+      "alias": [
+        "sala 1 a 1 3"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+    },
+    {
+      "space_id": 411,
+      "name": "space_4_11",
+      "floor": 4,
+      "kind": "one_on_one_room",
+      "room": null,
+      "label": "sala uno a uno 4",
+      "alias": [
+        "sala 1 a 1 4"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
     }
   ]
 }

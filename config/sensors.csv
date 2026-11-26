@@ -1,6 +1,6 @@
 sensor_id,device,space_id,since,until,note
-1,esp32_room_01,401,,,oficina abierta piso 4; no aparece en los datos de 1-11 oct
-2,esp32_room_02,402,,,oficina abierta piso 4; solo 2 h de datos el 2 oct
+1,esp32_room_01,402,,,oficina mentores (piso 4) junto con el sensor 2; no aparece en los datos de 1-11 oct
+2,esp32_room_02,402,,,oficina mentores (piso 4) junto con el sensor 1; solo 2 lecturas de 5 min el 2 oct
 3,esp32_room_03,308,,,salon 3308
 4,esp32_room_04,305,,,salon 3305
 5,esp32_room_05,304,,,salon 3304; sensor de gas muerto (eco2 = -1 en 96%)
