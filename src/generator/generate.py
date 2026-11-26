@@ -11,15 +11,19 @@ Generated data simulates and estimates; it never evaluates a model. Scoring
 the GRU against data from the generator would measure how well it imitates
 the equations, not the building.
 
+Without dates it generates the whole semester for every space it can, which
+is the file the API answers from (data/processed/generated.parquet, under a
+minute).
+
 Usage, from the src/ directory:
-    python -m generator.generate --since 2026-10-05 --until 2026-10-11
+    python -m generator.generate
     python -m generator.generate --since 2026-11-02 --until 2026-11-08 --spaces 308 201
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Initial implementation.
+    2026-11-26 - The whole semester by default, into config.GENERATED_DATA.
 
 Reference:
     Section 4.4 of the research document.
@@ -134,10 +138,10 @@ def main() -> int:
         Process exit code.
     """
     parser = argparse.ArgumentParser(description="Generate environmental data.")
-    parser.add_argument("--since", type=date.fromisoformat, required=True)
-    parser.add_argument("--until", type=date.fromisoformat, required=True)
+    parser.add_argument("--since", type=date.fromisoformat, default=FIRST_DAY.date())
+    parser.add_argument("--until", type=date.fromisoformat, default=LAST_DAY.date())
     parser.add_argument("--spaces", type=int, nargs="*", help="default: every space that can be generated")
-    parser.add_argument("--output", default=str(cfg.PROCESSED_DATA / "generated.parquet"))
+    parser.add_argument("--output", default=str(cfg.GENERATED_DATA))
     args = parser.parse_args()
 
     space_ids = args.spaces or [int(s) for s in load_params()["rooms"]]

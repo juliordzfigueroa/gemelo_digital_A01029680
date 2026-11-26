@@ -35,6 +35,10 @@ REAL_DATA = PROCESSED_DATA / "aulas3.parquet"
 # Outdoor weather for the same period, written by ingestion.weather.
 WEATHER_DATA = PROCESSED_DATA / "weather.parquet"
 
+# The generator's output, written by generator.generate. The API answers from
+# it wherever the sensors have no reading: other dates, rooms without sensor.
+GENERATED_DATA = PROCESSED_DATA / "generated.parquet"
+
 # Shared space registry: names for the classifier, floor clouds and markers
 # for the viewer.
 SPACES_FILE = ROOT / "config" / "spaces.json"
