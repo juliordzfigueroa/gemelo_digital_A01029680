@@ -25,12 +25,11 @@ Reference:
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from common import config as cfg
+from common import spaces
 
 # --------------------------------------------------------------------------
 # Classification vocabulary
@@ -83,46 +82,10 @@ VARIABLE_SYNONYMS = {
     "motion": ["movimiento", "ocupación", "ocupacion", "personas", "gente", "ocupado"],
 }
 
-def load_spaces(path: Path = cfg.SPACES_FILE) -> dict[int, list[str]]:
-    """Read the words that name each space from the shared registry.
-
-    Args:
-        ruta: The space registry shared with the cleaning, the API and the
-            viewer, so that all of them agree on what "3308" refers to.
-
-    Returns:
-        A dict from space_id to the lowercase names a user might type.
-    """
-    data = json.loads(path.read_text(encoding="utf-8"))
-    output = {}
-    for space in data["spaces"]:
-        names = {space["name"], *space.get("alias", [])}
-        if space.get("room"):
-            names.add(space["room"])
-        output[int(space["space_id"])] = sorted(
-            {str(n).lower() for n in names if n}, key=len, reverse=True
-        )
-    return output
-
-
-def load_floor_spaces(path: Path = cfg.SPACES_FILE) -> dict[int, list[int]]:
-    """Group the registered spaces by floor.
-
-    Args:
-        path: The shared space registry.
-
-    Returns:
-        A dict from floor number to the space ids on that floor.
-    """
-    data = json.loads(path.read_text(encoding="utf-8"))
-    output: dict[int, list[int]] = {}
-    for space in data["spaces"]:
-        output.setdefault(int(space["floor"]), []).append(int(space["space_id"]))
-    return output
-
-
-SPACES = load_spaces()
-FLOOR_SPACES = load_floor_spaces()
+# Read once at import: a space added to spaces.json needs a restart to be
+# recognized in a question.
+SPACES = spaces.names()
+FLOOR_SPACES = spaces.floor_spaces()
 
 # Floor 0 is the ground floor ("planta baja"); "primer piso" is floor 1, as
 # the room numbers say (3305 is on floor 3).

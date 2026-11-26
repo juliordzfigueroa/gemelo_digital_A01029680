@@ -31,7 +31,6 @@ Reference:
 
 from __future__ import annotations
 
-import json
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -43,6 +42,7 @@ from pydantic import BaseModel, Field
 
 from common import config as cfg
 from common import data as dat
+from common import spaces
 from gru import predict as pred
 from llm import classifier, context, llm_client, replies
 
@@ -341,29 +341,6 @@ def _number(value: object) -> float | None:
 # --------------------------------------------------------------------------
 # Floor questions
 # --------------------------------------------------------------------------
-def _space_labels() -> dict[int, str]:
-    """Return the name a person uses for each space.
-
-    The room number when there is one ("3308"). Spaces without one, like the
-    open offices of floor 4, get a readable name built from the registry name
-    ("space_4_2" becomes "oficina 4-2"). The prompt gets these instead of ids
-    so the answer never says "espacio 5" or "space_4_2".
-
-    Returns:
-        A dict from space id to its label.
-    """
-    registry = json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
-    labels = {}
-    for s in registry["spaces"]:
-        if s.get("room"):
-            label = s["room"]
-        else:
-            number = s["name"].removeprefix("space_").replace("_", "-")
-            label = f"oficina {number}" if s.get("kind") == "open_office" else f"espacio {number}"
-        labels[int(s["space_id"])] = label
-    return labels
-
-
 def _floor_summary(rooms: list[dict], key: str, variables: list[str]) -> dict:
     """Mean, minimum and maximum of each variable across the rooms of a floor.
 
@@ -416,7 +393,7 @@ def _floor_data(intent: classifier.Intent, floor: int | None) -> dict:
         A dict shaped for context._prompt_floor, with "scope" set to
         "floor" or "building".
     """
-    labels = _space_labels()
+    labels = spaces.labels()
     if floor is None:
         space_ids = sorted(s for spaces in classifier.FLOOR_SPACES.values() for s in spaces)
     else:
@@ -524,7 +501,7 @@ def _retrieve(intent: classifier.Intent, space_id: int) -> dict:
         data = _current_data(space_id)
     # The prompt names the space by its room number: given the id, Llama
     # answered "espacio 308" and, with the old ids, "espacio 5".
-    data["space"] = _space_labels().get(space_id, space_id)
+    data["space"] = spaces.labels().get(space_id, space_id)
     return data
 
 
@@ -601,7 +578,7 @@ def _with_article(label: str) -> str:
 
 def _rooms_with_data() -> list[str]:
     """Return the labels of the spaces that have readings, sorted."""
-    labels = _space_labels()
+    labels = spaces.labels()
     ids = sorted(int(s) for s in STATE["data"][cfg.SPACE_COLUMN].unique())
     return [str(labels.get(s, s)) for s in ids]
 
@@ -624,7 +601,7 @@ def _unknown_room_message(number: str, question: str = "") -> str:
             "unknown_room_no_floor", question, number=number,
             top_floor=max(classifier.FLOOR_SPACES),
         )
-    labels = _space_labels()
+    labels = spaces.labels()
     known = replies.spoken_list(
         [str(labels[s]) for s in sorted(classifier.FLOOR_SPACES[floor])]
     )
@@ -645,11 +622,8 @@ def _no_sensor_message(space_id: int, question: str = "") -> str:
     Returns:
         A sentence for the user.
     """
-    label = str(_space_labels().get(space_id, space_id))
-    registry = json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
-    aliases = next(
-        (s.get("alias", []) for s in registry["spaces"] if int(s["space_id"]) == space_id), []
-    )
+    label = str(spaces.labels().get(space_id, space_id))
+    aliases = spaces.aliases(space_id)
     asked = next(
         (a for a in aliases if a != label and a.isdigit() and a in question.lower()), None
     )
@@ -697,7 +671,7 @@ def root() -> RedirectResponse:
 
 
 @app.get("/spaces")
-def spaces() -> dict:
+def get_spaces() -> dict:
     """List the floors and spaces the viewer draws, with their latest reading.
 
     The registry is read on every call rather than at startup, so a marker
@@ -708,7 +682,7 @@ def spaces() -> dict:
         The scan server address, the floor clouds, and every space with its
         marker, dimensions and latest reading (empty when it has no sensor).
     """
-    registry = json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
+    registry = spaces.read()
     output = []
     for space in registry["spaces"]:
         current = _current_data(int(space["space_id"]))
@@ -731,7 +705,7 @@ def spaces() -> dict:
 
 
 @app.get("/spaces/registry")
-def spaces_registry() -> dict:
+def get_registry() -> dict:
     """Return config/spaces.json as it is on disk.
 
     The viewer merges the markers and dimensions measured in Potree into this
@@ -741,7 +715,7 @@ def spaces_registry() -> dict:
     Returns:
         The parsed registry file.
     """
-    return json.loads(cfg.SPACES_FILE.read_text(encoding="utf-8"))
+    return spaces.read()
 
 
 @app.post("/context")
