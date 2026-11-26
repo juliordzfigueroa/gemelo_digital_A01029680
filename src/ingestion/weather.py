@@ -22,7 +22,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Initial implementation.
+    2026-11-26 - Weather columns listed once; fixed stale names.
 
 Reference:
     Open-Meteo API: https://open-meteo.com/en/docs
@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from common import config as cfg
+from common import data as dat
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -52,6 +53,10 @@ VARIABLES = {
     "cloud_cover": "cloud_cover_ext",
 }
 
+# Every numeric column this module adds to the sensor data: the downloaded
+# ones plus the absolute humidity computed from them.
+WEATHER_COLUMNS = [*VARIABLES.values(), "abs_humidity_ext"]
+
 TIMEOUT_S = 30.0
 
 
@@ -59,7 +64,7 @@ def absolute_humidity(temperature: np.ndarray, relative_humidity: np.ndarray) ->
     """Convert temperature and relative humidity into absolute humidity.
 
     Args:
-        temperatura: Air temperature in degrees Celsius.
+        temperature: Air temperature in degrees Celsius.
         relative_humidity: Relative humidity in percent.
 
     Returns:
@@ -79,8 +84,8 @@ def _query(url: str, since: date, until: date) -> pd.DataFrame:
 
     Args:
         url: Archive or forecast endpoint.
-        desde: First day, inclusive.
-        hasta: Last day, inclusive.
+        since: First day, inclusive.
+        until: Last day, inclusive.
 
     Returns:
         One row per hour, with the project column names. Hours the service
@@ -114,12 +119,12 @@ def download(since: date, until: date) -> pd.DataFrame:
     """Download hourly weather, filling the archive's recent gap from the forecast.
 
     Args:
-        desde: First day, inclusive.
-        hasta: Last day, inclusive.
+        since: First day, inclusive.
+        until: Last day, inclusive.
 
     Returns:
-        One row per hour with the weather columns, humedad_abs_ext and a
-        'fuente' column saying whether each hour came from the archive or the
+        One row per hour with the weather columns, abs_humidity_ext and a
+        'source' column saying whether each hour came from the archive or the
         forecast service.
     """
     archive = _query(ARCHIVE_URL, since, until)
@@ -148,18 +153,17 @@ def to_intervals(hourly: pd.DataFrame) -> pd.DataFrame:
     hour available.
 
     Args:
-        horario: Output of download().
+        hourly: Output of download().
 
     Returns:
         One row per 5-minute interval.
     """
-    numeric = [*VARIABLES.values(), "abs_humidity_ext"]
     series = hourly.set_index(cfg.TIME_COLUMN)
     grid = pd.date_range(
         series.index.min(), series.index.max(), freq=f"{cfg.INTERVAL_SECONDS}s"
     )
     output = (
-        series[numeric]
+        series[WEATHER_COLUMNS]
         .reindex(series.index.union(grid))
         .interpolate(method="time", limit_area="inside")
         .reindex(grid)
@@ -172,14 +176,14 @@ def attach(data: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     """Attach the outdoor weather to every sensor row.
 
     Args:
-        datos: Contract frame.
-        clima: Output of to_intervals(), or the saved weather.parquet.
+        data: Contract frame.
+        weather: Output of to_intervals(), or the saved weather.parquet.
 
     Returns:
         The sensor rows with the weather columns added; rows outside the
         weather range keep NaN.
     """
-    columns = [cfg.TIME_COLUMN, *VARIABLES.values(), "abs_humidity_ext"]
+    columns = [cfg.TIME_COLUMN, *WEATHER_COLUMNS]
     return data.merge(weather[columns], on=cfg.TIME_COLUMN, how="left")
 
 
@@ -187,7 +191,7 @@ def summary(data: pd.DataFrame) -> pd.DataFrame:
     """Compare indoor and outdoor conditions per space.
 
     Args:
-        datos: Output of attach().
+        data: Output of attach().
 
     Returns:
         One row per space with mean indoor and outdoor temperature and
@@ -216,8 +220,6 @@ def main() -> int:
     Returns:
         Process exit code.
     """
-    from common import data as dat
-
     parser = argparse.ArgumentParser(description="Download outdoor weather.")
     parser.add_argument("--data", default=None, help="contract frame whose dates to cover")
     parser.add_argument("--since", type=date.fromisoformat, default=None)
