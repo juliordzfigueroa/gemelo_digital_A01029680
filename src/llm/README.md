@@ -80,12 +80,27 @@ capital de Francia?".
 
 ### Preguntas por una fecha
 
-Una pregunta puede nombrar un día y una hora del semestre (del 14 de
-septiembre al 6 de diciembre): "¿cómo estuvo el 3308 el 3 de noviembre a las
-10?", "¿cómo estará el piso 3 el 10 de nov?", "temperatura del 3206 a las 5
-de la tarde". Sin hora, se toma el mediodía, y en una pregunta de historial,
-el día completo. Sin fecha, todo sigue como antes: el "ahora" es la última
-lectura medida.
+Una pregunta puede nombrar un momento del semestre (del 14 de septiembre al 6
+de diciembre) de varias formas, que se pueden combinar:
+
+| Forma | Ejemplos |
+|---|---|
+| Fecha | "el 3 de noviembre", "el 10 de nov" |
+| Día de la semana | "el martes", "el martes pasado", "el próximo jueves", "el jueves que viene" |
+| Día contado desde hoy | "hoy", "ayer", "anteayer", "mañana", "pasado mañana" |
+| Hora | "a las 10", "a las 10:30", "a las 5 de la tarde" |
+| Parte del día | "en la mañana" (10:00), "al mediodía", "en la tarde" (16:00), "en la noche" (20:00) |
+
+**Qué martes es "el martes":** lo decide el tiempo del verbo. En pasado o en
+presente ("¿cómo estuvo el martes?") es el martes más reciente, hoy incluido; en
+futuro ("¿cómo estará el martes?"), el siguiente. "Pasado" y "próximo" mandan
+sobre el verbo. Todo se cuenta desde el "ahora" (la última lectura medida), y
+la respuesta muestra la fecha que usó, así que una confusión se ve.
+
+Sin hora se toma el mediodía, salvo hoy, que es ahora; en una pregunta de
+historial, el día completo. Una pregunta de pronóstico con fecha se responde
+con el estado de ese momento, y el visor la marca como lectura. Sin fecha, todo
+sigue como antes.
 
 Cada respuesta tiene un solo origen, que el código decide (`api/sources.py`)
 y escribe en el prompt, en una nota debajo de la respuesta y en el visor:
@@ -102,8 +117,8 @@ de qué fechas sí hay datos. Todo sale de `data/processed/generated.parquet`,
 que escribe `python -m generator.generate`.
 
 **Lo que todavía no puede:** recordar la pregunta anterior ("¿y en una
-hora?"), comparar dos salones, días de la semana ("el martes a las 10"), más
-de una variable en el histórico, detectar sensores atascados, y datos en
+hora?"), comparar dos salones, rangos de días ("toda la semana"), más de una
+variable en el histórico, detectar sensores atascados, y datos en
 vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
 3208, 3304 (sin CO₂ casi siempre), 3305, 3308 y la oficina de mentores del piso 4
 (solo 2 lecturas, del 2 de octubre).

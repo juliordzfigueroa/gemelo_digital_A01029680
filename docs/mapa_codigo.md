@@ -107,8 +107,8 @@ Navegador ── index.html + viewer.js ◄── API :8000 (sirve la página y 
 6. **[src/api/api.py](../src/api/api.py), solo las partes del visor.**
    - Línea 139: `app.mount("/viewer", ...)` sirve la carpeta `web/` como
      página.
-   - `root` (línea 276): abrir `localhost:8000` manda al visor.
-   - `get_spaces` (línea 282): la ruta `/spaces`, que le da al visor la dirección
+   - `root` (línea 333): abrir `localhost:8000` manda al visor.
+   - `get_spaces` (línea 339): la ruta `/spaces`, que le da al visor la dirección
      del servidor de escaneos, la lista de pisos y los salones con su última
      lectura.
 
@@ -451,10 +451,11 @@ servidores Flask.
    aplicación y sus rutas.
    - `Question` y `Answer` (líneas 60 y 66): lo que manda y recibe el visor.
    - `_moment` (línea 145): el momento de la pregunta: la última lectura, o
-     la fecha y hora que nombra.
-   - `_target_and_data` (línea 174): el ruteo. Lee los `if` en orden: salón,
+     la fecha y hora que nombra. `_named_day` (línea 181) decide qué martes
+     es "el martes", según el tiempo del verbo.
+   - `_target_and_data` (línea 235): el ruteo. Lee los `if` en orden: salón,
      número desconocido, piso, edificio, charla, y al final "¿de qué salón?".
-   - `chat` (línea 367): la cadena completa de una pregunta.
+   - `chat` (línea 423): la cadena completa de una pregunta.
 
 2. **[src/llm/classifier.py](../src/llm/classifier.py)** y
    **[src/llm/vocabulary.py](../src/llm/vocabulary.py).**
@@ -528,7 +529,7 @@ servidores Flask.
 5. Cuando llegue la base de datos del Tec, ¿qué función cambias?
 
 Respuestas: 1) "No puedo responder ahora mismo." seguido de la razón; se
-decide en `chat`, en el `except RuntimeError` (línea 385 de `api.py`). 2)
+decide en `chat`, en el `except RuntimeError` (línea 441 de `api.py`). 2)
 Porque las palabras de edificio se buscan como palabras completas, con
 `_contains_word`. 3) `llm/vocabulary.py`: se agrega a
 `VARIABLE_SYNONYMS["temperature"]`. 4) El código: `formatting.trend`. 5)

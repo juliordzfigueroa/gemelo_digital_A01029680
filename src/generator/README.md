@@ -73,10 +73,13 @@ mismo umbral de 10%, la estimación más cautelosa.
 
 - **Salón medido:** con sus propios parámetros. Sus valores son "simulado".
 - **Salón sin sensor de un tipo medido:** con el promedio de los salones
-  medidos de su tipo. Sus valores son "estimado".
-- **Tipo nunca medido** (laboratorios, salas de juntas, oficinas): no se
-  genera, porque no hay nada en qué basarlo. Hoy son 18 espacios, entre ellos
-  todo el piso 4: la oficina de mentores tiene solo 2 lecturas.
+  medidos de su tipo, salvo la luz, que viene de los salones medidos de su
+  mismo grupo de ventanas (ver abajo). Sus valores son "estimado". Hoy son
+  los 28 salones de los pisos 0 a 3.
+- **Tipo nunca medido** (laboratorios, estudios, aula magna, salas de juntas,
+  oficinas): no se genera, porque no hay nada en qué basarlo. Hoy son 31
+  espacios, entre ellos todo el piso 4: la oficina de mentores tiene solo 2
+  lecturas.
 
 El 3304 tiene sensor, pero su sensor de gas está muerto y sus demás
 variables tienen menos de un día de lecturas, así que se genera completo con
@@ -141,10 +144,16 @@ Lo que dicen:
   salón tiene su propio aire acondicionado), y por ella en humedad relativa.
   El 3305 es el caso extremo: es el más caliente (27.5 °C), y con la
   temperatura del promedio su humedad relativa sale 12 puntos arriba.
-- **La luz necesita subtipos.** Al promediar un salón sin ventanas (3206) con
-  uno de mucha ventana (3305), el tipo "salón" queda en medio de los dos. El
-  diseño de la luz ya proponía heredar por tipo de iluminación (interior,
-  ventana, mixto); falta anotar ese tipo en `spaces.json`.
+- **La luz se hereda por grupo de ventanas.** `spaces.json` anota cuántas
+  ventanas tiene cada espacio, y la luz de un salón sin sensor viene de los
+  medidos de su grupo: "interior" (sin ventanas, el 3206) o "ventana" (3208,
+  3305 y 3308). Así, del 3201 al 3207 heredan el k = 3 del 3206 en lugar de un
+  k promedio de 44 que les inventaba sol. Entre los salones con ventana no
+  mejora la validación (el error de la luz quedó en 7.1%, como antes: el 3305
+  mejora, el 3208 y el 3308 empeoran un poco), porque la luz natural depende
+  más de hacia dónde dan las ventanas que de tenerlas (k va de 13 a 120). Y el
+  grupo interior no se puede validar dejando uno fuera: el 3206 es el único
+  salón interior medido.
 
 ## Decisiones que el documento no fija
 
@@ -171,13 +180,16 @@ Lo que dicen:
   y quitar "cualquier espacio del que se conozca su volumen".
 - ε como proceso AR(1), con la deriva del sensor MOX como su causa principal.
 - La humedad comparte la λ del CO₂.
-- Los resultados de la validación dejando un salón fuera, y que la luz
-  necesita subtipos de iluminación.
+- Los resultados de la validación dejando un salón fuera, y que la luz se
+  hereda por grupo de ventanas (interior o ventana).
 - Qué tipos no se generan: todo lo que no es salón, por ahora.
 
 ## Pendiente
 
-- Subtipos de iluminación en `spaces.json` (interior, ventana, mixto).
+- La orientación de las ventanas (hacia dónde dan), que explicaría mejor la
+  luz natural que solo contarlas. Un sensor en un salón interior más
+  permitiría validar el grupo interior.
+- Las ventanas del 3108, el 3109 y las oficinas, sin anotar todavía.
 - Recalibrar con las exportaciones nuevas. Con más semanas se afinan los
   cambios de estado de la luz y se puede calibrar la oficina de mentores, que
   daría el tipo "oficina".
