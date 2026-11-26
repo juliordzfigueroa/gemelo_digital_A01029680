@@ -18,7 +18,7 @@ Julio César Rodríguez Figueroa — A01029680
 | **Visor** | Potree en el navegador: un escaneo por piso, marcadores por salón y chat | listo; faltan los marcadores de los salones y corregir la altura entre pisos |
 | **Servidor de escaneos** | Sirve las nubes convertidas, aparte de la API | listo |
 | **Detector de anomalías** | Regla 3σ sobre la última lectura; el chat la usa en las preguntas de anomalía | listo; no detecta sensores atascados (medido) |
-| **Generador** | Modelos de caja gris por variable: estima los salones sin sensor y simula el semestre | listo para salones; validado dejando uno fuera |
+| **Generador** | Modelos de caja gris por variable: estima los salones sin sensor y simula el semestre; el chat responde con él por cualquier fecha | listo para salones; validado dejando uno fuera |
 
 El GRU es de dos capas [128, 64], con un ID de espacio como rasgo para que un
 solo modelo sirva a todo el edificio. Su celda recurrente está escrita a mano
@@ -672,8 +672,8 @@ python -m llm.classifier                               # cómo se rutean las pre
 python -m llm.context                                  # los prompts por tipo
 python -m anomaly.evaluate                             # precisión y recall del detector 3σ
 python -m generator.calibrate                          # parámetros del generador para cada espacio
-python -m generator.generate --since 2026-11-02 --until 2026-11-08   # generar una semana
 python -m generator.validate                           # validación dejando un salón fuera
+python -m generator.generate                           # el semestre completo, del que responde el chat
 ```
 
 | Opción | Para qué |

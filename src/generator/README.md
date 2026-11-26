@@ -84,22 +84,30 @@ los parámetros de su tipo.
 
 ## En el chat
 
-Una pregunta por un salón sin sensor de un tipo medido ("¿cómo está el
-3201?") se responde con una estimación (`src/api/estimates.py`). El generador
-recorre las últimas 24 horas del salón con su horario y el clima de esas
-horas, hasta el mismo "ahora" que los salones medidos. El último paso es la
-lectura estimada y las 24 horas son el historial. La etiqueta va en tres
-lugares: en el prompt, en una nota que escribe el código después de la
-respuesta de Llama, y en la línea de abajo del visor ("estimado, sin
-sensor"). El error esperado de la nota es el de la validación de abajo.
+El chat responde desde el semestre generado (`data/processed/generated.parquet`)
+donde los sensores no tienen lectura (`src/api/sources.py`):
 
-No hay pronóstico del GRU para esos salones, porque el GRU solo conoce los
-medidos, ni revisión de anomalías, porque en una estimación no hay nada que
-pueda fallar: el chat explica por qué. Los espacios de tipos nunca medidos
-siguen respondiendo "no tiene sensor".
+- **Salones sin sensor**, de un tipo medido: lectura, historial y pronóstico
+  "estimados".
+- **Cualquier fecha del semestre**: si el sensor de un salón no midió ese día,
+  sus valores son "simulados".
+- **Pisos y edificio**: incluyen los salones estimados, cada uno marcado.
 
-Para probarlo en el visor hay que haber corrido `python -m generator.calibrate`
-y `python -m generator.validate`, y reiniciar la API.
+La etiqueta va en tres lugares: en el prompt, en una nota que escribe el
+código después de la respuesta de Llama, y en la línea de abajo del visor. El
+error típico de la nota es el de la validación dejando un salón fuera, para
+todos los valores generados. Para los simulados es conservador a propósito:
+el error con parámetros propios se midió sobre los mismos días de la
+calibración y saldría optimista (daba ±0.1 °C).
+
+No se buscan anomalías en valores generados: en ellos no hay un sensor que
+pueda fallar. Los espacios de tipos nunca medidos siguen respondiendo "no
+tiene sensor".
+
+Para probarlo en el visor hay que correr, en este orden,
+`python -m generator.calibrate`, `python -m generator.validate` y
+`python -m generator.generate` (todo el semestre, menos de un minuto), y
+reiniciar la API.
 
 ## Validación
 

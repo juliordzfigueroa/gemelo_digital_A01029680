@@ -61,7 +61,7 @@ recibe la misma respuesta y una demostración se puede repetir.
 | Fuera de tema (pregunta de chatbot general) | "¿cuál es la capital de Francia?", "escríbeme un poema", "explícame qué es el CO₂", "¿qué opinas de…?" | Que no es un asistente general y qué sí puede responder |
 | Pregunta del edificio sin lugar | "¿cómo está el CO₂?", "¿cómo están los valores?" | "¿De qué salón o piso te gustaría saber?". Nunca responde sobre un salón por omisión |
 | Salón que no existe | "3310", "2905" | Que no está registrado y qué salones hay en ese piso; o que los salones de Aulas 3 empiezan con 3 |
-| Salón sin sensor, de un tipo medido | "3309", "¿cuál fue el máximo de CO₂ del 3301?" | Una **estimación** del generador (lectura actual o historial del último día), con una nota escrita por el código: que es estimado, de qué salones sale y su error esperado. Pronóstico y anomalías no: se explica por qué |
+| Salón sin sensor, de un tipo medido | "3309", "¿cuál fue el máximo de CO₂ del 3301?", "¿cómo va a estar el 3201 en una hora?" | Una **estimación** del generador (lectura, historial o pronóstico), con una nota escrita por el código: que es estimado, de qué salones sale y su error típico. Anomalías no: solo se buscan en lecturas reales |
 | Espacio sin sensor de un tipo nunca medido | "sala de juntas 2" | Que no tiene sensor y cuáles sí tienen datos |
 | Alias | "3302" | Que corresponde al 3301 (el 3302 no existe físicamente), y su estimación |
 
@@ -78,10 +78,33 @@ agradecimiento o fuera de tema. Las frases genéricas ("cuál es", "hoy") no
 cuentan como palabras del edificio, porque también las tiene "¿cuál es la
 capital de Francia?".
 
+### Preguntas por una fecha
+
+Una pregunta puede nombrar un día y una hora del semestre (del 14 de
+septiembre al 6 de diciembre): "¿cómo estuvo el 3308 el 3 de noviembre a las
+10?", "¿cómo estará el piso 3 el 10 de nov?", "temperatura del 3206 a las 5
+de la tarde". Sin hora, se toma el mediodía, y en una pregunta de historial,
+el día completo. Sin fecha, todo sigue como antes: el "ahora" es la última
+lectura medida.
+
+Cada respuesta tiene un solo origen, que el código decide (`api/sources.py`)
+y escribe en el prompt, en una nota debajo de la respuesta y en el visor:
+
+| Origen | Cuándo |
+|---|---|
+| medido | El sensor midió ese momento (o ese periodo) |
+| simulado | El salón tiene sensor, pero no midió ese momento: generador con sus propios parámetros |
+| estimado | El salón no tiene sensor, o tiene uno sin datos suficientes (3304): generador con los parámetros de su tipo |
+
+En un piso o en el edificio, cada salón lleva su marca: "3201 (estimado)".
+Fuera del semestre, o en un espacio que el generador no estima, el chat dice
+de qué fechas sí hay datos. Todo sale de `data/processed/generated.parquet`,
+que escribe `python -m generator.generate`.
+
 **Lo que todavía no puede:** recordar la pregunta anterior ("¿y en una
-hora?"), comparar dos salones, fechas u horas concretas ("el martes a las
-10"), más de una variable en el histórico, detectar sensores atascados, y
-datos en vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
+hora?"), comparar dos salones, días de la semana ("el martes a las 10"), más
+de una variable en el histórico, detectar sensores atascados, y datos en
+vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
 3208, 3304 (sin CO₂ casi siempre), 3305, 3308 y la oficina de mentores del piso 4
 (solo 2 lecturas, del 2 de octubre).
 
@@ -108,7 +131,9 @@ Una pregunta recorre cuatro pasos y cada uno tiene un dueño distinto:
 ```
 llm/classifier.py     decide de qué tipo es la pregunta y de dónde   (reglas, sin LLM)
 llm/vocabulary.py       las palabras que busca el clasificador
-api/retrieval.py      recupera los datos que ese tipo pide           (GRU, datos, detector)
+api/retrieval.py      recupera los datos de un salón en un momento    (GRU, datos, detector)
+api/floors.py           lo mismo para un piso o el edificio
+api/sources.py          decide el origen: el sensor, o el generador
 llm/context.py        arma el prompt de un salón                     (plantillas)
 llm/floor_prompt.py   arma el prompt de un piso o del edificio,
                         y escribe el detalle por salón

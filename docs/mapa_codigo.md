@@ -105,10 +105,10 @@ Navegador ── index.html + viewer.js ◄── API :8000 (sirve la página y 
      `send_file`, que igual entiende rangos.
 
 6. **[src/api/api.py](../src/api/api.py), solo las partes del visor.**
-   - Línea 125: `app.mount("/viewer", ...)` sirve la carpeta `web/` como
+   - Línea 139: `app.mount("/viewer", ...)` sirve la carpeta `web/` como
      página.
-   - `root` (línea 202): abrir `localhost:8000` manda al visor.
-   - `get_spaces` (línea 208): la ruta `/spaces`, que le da al visor la dirección
+   - `root` (línea 276): abrir `localhost:8000` manda al visor.
+   - `get_spaces` (línea 282): la ruta `/spaces`, que le da al visor la dirección
      del servidor de escaneos, la lista de pisos y los salones con su última
      lectura.
 
@@ -449,10 +449,12 @@ servidores Flask.
 
 1. **[src/api/api.py](../src/api/api.py).** Es como tu servidor Flask: la
    aplicación y sus rutas.
-   - `Question` y `Answer` (líneas 55 y 61): lo que manda y recibe el visor.
-   - `_target_and_data` (línea 131): el ruteo. Lee los `if` en orden: salón,
+   - `Question` y `Answer` (líneas 60 y 66): lo que manda y recibe el visor.
+   - `_moment` (línea 145): el momento de la pregunta: la última lectura, o
+     la fecha y hora que nombra.
+   - `_target_and_data` (línea 174): el ruteo. Lee los `if` en orden: salón,
      número desconocido, piso, edificio, charla, y al final "¿de qué salón?".
-   - `chat` (línea 284): la cadena completa de una pregunta.
+   - `chat` (línea 367): la cadena completa de una pregunta.
 
 2. **[src/llm/classifier.py](../src/llm/classifier.py)** y
    **[src/llm/vocabulary.py](../src/llm/vocabulary.py).**
@@ -467,12 +469,15 @@ servidores Flask.
 
 3. **[src/api/retrieval.py](../src/api/retrieval.py).** De dónde salen los
    números.
-   - `STATE` (línea 46) y `space_rows` (línea 58): la única función que
+   - `STATE` (línea 55) y `space_rows` (línea 67): la única función que
      cambia cuando llegue la base de datos del Tec (`TODO E5`).
+   - `rows_between` (línea 96): las filas de un periodo, del sensor si midió
+     algo ahí, si no del generador; nunca mezcladas.
    - `current_data`, `history_data`, `anomaly_data` y `forecast_data`
-     (líneas 96, 120, 154 y 208): un salón.
-   - `floor_data` (línea 289): un piso o el edificio; `_floor_summary` (línea
-     402) calcula el promedio y los extremos.
+     (líneas 167, 192, 236 y 297): un salón en un momento.
+   - [src/api/floors.py](../src/api/floors.py): `floor_data` (línea 35), un
+     piso o el edificio; `_floor_summary` (línea 192) calcula el promedio y
+     los extremos.
 
 4. **[src/llm/context.py](../src/llm/context.py).** Los prompts de un salón.
    `SYSTEM_PROMPT` (línea 41) son las reglas; `build_prompt` (línea 57) elige
@@ -523,7 +528,7 @@ servidores Flask.
 5. Cuando llegue la base de datos del Tec, ¿qué función cambias?
 
 Respuestas: 1) "No puedo responder ahora mismo." seguido de la razón; se
-decide en `chat`, en el `except RuntimeError` (línea 302 de `api.py`). 2)
+decide en `chat`, en el `except RuntimeError` (línea 385 de `api.py`). 2)
 Porque las palabras de edificio se buscan como palabras completas, con
 `_contains_word`. 3) `llm/vocabulary.py`: se agrega a
 `VARIABLE_SYNONYMS["temperature"]`. 4) El código: `formatting.trend`. 5)
@@ -593,10 +598,10 @@ clima (Open-Meteo) ──────────────┘                
    parámetros, los de su tipo, o no se genera.
 7. **[src/generator/generate.py](../src/generator/generate.py)** y
    **[validate.py](../src/generator/validate.py).** Generar fechas y validar.
-8. **[src/api/estimates.py](../src/api/estimates.py).** Donde el generador se
-   conecta con el chat: `estimate` corre las últimas 24 horas de un salón sin
-   sensor y devuelve su estimación con el error esperado; `api._target_and_data`
-   la usa cuando un salón no tiene lecturas pero sí es de un tipo medido.
+8. **[src/api/sources.py](../src/api/sources.py).** Donde el generador se
+   conecta con el chat: carga el semestre generado y dice, con
+   `provenance` (línea 105), de qué salones sale un valor generado y su error
+   típico. `retrieval.rows_between` decide cuándo usarlo.
 
 ### Preguntas para comprobar
 
