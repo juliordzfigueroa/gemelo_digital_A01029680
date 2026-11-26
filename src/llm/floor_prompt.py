@@ -11,7 +11,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Moved here from context.py and split by kind of question.
+    2026-11-26 - Moved here from context.py; anomaly questions added.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -27,6 +27,14 @@ SUMMARY_ONLY = (
     "Escribe SOLO el resumen de {phrase}, en una o dos oraciones: el "
     "promedio, los espacios extremos y, si los hay, los que están fuera de "
     "rango. Usa únicamente los adjetivos de la sección FUERA DE RANGO. No "
+    "hagas una lista por salón ni menciones espacios sin datos: el detalle lo "
+    "agrega el sistema."
+)
+
+# The same instruction for an anomaly question, which has no average to give.
+ANOMALIES_ONLY = (
+    "Escribe SOLO el resumen de {phrase}, en una o dos oraciones: cuántos "
+    "espacios tienen anomalías y en qué variable, o que no hay ninguna. No "
     "hagas una lista por salón ni menciones espacios sin datos: el detalle lo "
     "agrega el sistema."
 )
@@ -67,7 +75,7 @@ def prompt(intent: Intent, data: dict) -> str:
     if data.get("state") == "unavailable":
         parts += [
             f"NO SE PUDO EVALUAR {phrase}: {data.get('detail', '')}",
-            "Dile al usuario que esta capacidad aún no está disponible. "
+            "Dile al usuario que esta revisión no está disponible y por qué. "
             "No afirmes que no hay anomalías.",
         ]
         return "\n".join(parts)
@@ -82,6 +90,11 @@ def prompt(intent: Intent, data: dict) -> str:
 
     parts.append(f"{heading}: {len(rooms)} espacios con datos.")
     kind = data.get("kind")
+    if kind == "anomaly":
+        parts += _anomaly_summary(data)
+        parts += ["", ANOMALIES_ONLY.format(phrase=phrase)]
+        return "\n".join(parts)
+
     if kind == "forecast":
         parts += _forecast_summary(data)
     elif kind == "history":
@@ -164,6 +177,43 @@ def _current_summary(data: dict) -> list[str]:
     return lines
 
 
+def _anomaly_summary(data: dict) -> list[str]:
+    """What the 3-sigma detector found in the latest reading of every room."""
+    checked = ", ".join(fmt.VARIABLE_NAMES.get(v, v) for v in data.get("variables", []))
+    lines = [
+        "",
+        f"DETECTOR DE ANOMALÍAS (regla 3σ), lecturas de las "
+        f"{data.get('timestamp', 'hora desconocida')}. Variables revisadas: {checked}.",
+    ]
+    found = False
+    for room in data.get("rooms", []):
+        for item in room["anomalies"]:
+            lines.append(f"  {room['room']}: {fmt.anomaly(item)}{_older_reading(data, room)}")
+            found = True
+    if not found:
+        lines.append("  Ningún espacio tiene anomalías.")
+    return lines
+
+
+def _older_reading(data: dict, room: dict) -> str:
+    """Say when a room's reading is older than the rest of the floor's.
+
+    A sensor that stopped reporting still has a "latest" reading, possibly
+    days old, and an anomaly in it must not read as if it were happening now.
+
+    Args:
+        data: Built by retrieval.floor_data(); "timestamp" is the newest
+            reading of the floor.
+        room: One entry of data["rooms"].
+
+    Returns:
+        ", lectura del <fecha>" when the room's reading is older, else "".
+    """
+    if room.get("timestamp") and room["timestamp"] != data.get("timestamp"):
+        return f", lectura del {room['timestamp']}"
+    return ""
+
+
 def detail(data: dict) -> str:
     """Write the room-by-room detail of a floor or building answer.
 
@@ -209,6 +259,12 @@ def _room_values(data: dict, room: dict) -> str:
     """
     kind = data.get("kind")
     variables = data.get("variables", [])
+
+    if kind == "anomaly":
+        if not room["anomalies"]:
+            return "sin anomalías"
+        found = " · ".join(fmt.anomaly_short(item) for item in room["anomalies"])
+        return found + _older_reading(data, room)
 
     if kind == "history":
         v = variables[0] if variables else "co2"
