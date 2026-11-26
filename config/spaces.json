@@ -1,7 +1,7 @@
 {
-  "_description": "Fuente única de espacios: la leen la limpieza, el clasificador, la API y el visor. space_id = piso*100 + número. label es el nombre que se muestra y se puede escribir en el chat cuando el espacio no tiene número de salón (piso 4). Un espacio existe aunque no tenga sensor; qué sensor mide qué espacio vive en sensors.csv.",
+  "_description": "Fuente única de espacios: la leen la limpieza, el clasificador, la API y el visor. space_id = piso*100 + número. windows es cuántas ventanas tiene (0 = interior; null = sin anotar); el generador la usa para heredar la luz de un salón medido parecido. label es el nombre que se muestra y se puede escribir en el chat cuando el espacio no tiene número de salón (piso 4). Un espacio existe aunque no tenga sensor; qué sensor mide qué espacio vive en sensors.csv.",
   "_floors": "cloud es la ruta de la nube convertida, relativa a la raíz del servidor de escaneos (SCANS_DIR). transform lleva el LAS de cada piso al marco común del edificio (el de Aulas_3_Completo 1.e57): p = R(rotation_deg)·p_piso + (dx, dy), z sin cambio; lo aplica scans.transform y se midió registrando un corte horizontal de cada piso contra el combinado (residual_cm = error mediano). marker es [x, y, z] en ese marco común; dimensions es {length, width, height} en metros.",
-  "_pending": "marker y dimensions de cada salón: se miden en el visor de Potree; tipos de pisos 0 y 1; el horario menciona S01_LAB, que no se incluyó porque no sigue la numeración.",
+  "_pending": "marker y dimensions de cada espacio: se miden en el visor de Potree; ventanas del 3108, 3109 y las oficinas; el horario menciona S01_LAB, que no se incluyó porque no sigue la numeración.",
   "floors": [
     {
       "floor": 0,
@@ -61,76 +61,421 @@
   ],
   "spaces": [
     {
+      "space_id": 1,
+      "name": "space_0_1",
+      "floor": 0,
+      "room": "3001",
+      "alias": [
+        "3001"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "tv_studio",
+      "windows": 0,
+      "note": "Estudio de televisión."
+    },
+    {
       "space_id": 3,
       "name": "space_0_3",
       "floor": 0,
-      "kind": "unknown",
+      "kind": "recording_studio",
       "room": "3003",
       "alias": [
         "3003"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 0,
+      "note": "Estudio grande de grabación: cabina de instrumentos y cabina de electrónicos/productor."
+    },
+    {
+      "space_id": 4,
+      "name": "space_0_4",
+      "floor": 0,
+      "room": "3004",
+      "alias": [
+        "3004"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "recording_studio",
+      "windows": 0,
+      "note": "Conjunto de 6 cabinas de grabación."
+    },
+    {
+      "space_id": 5,
+      "name": "space_0_5",
+      "floor": 0,
+      "room": "3005",
+      "alias": [
+        "3005"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "lab",
+      "windows": 0,
+      "note": "Laboratorio de tecnologías inmersivas."
     },
     {
       "space_id": 6,
       "name": "space_0_6",
       "floor": 0,
-      "kind": "unknown",
+      "kind": "classroom",
       "room": "3006",
       "alias": [
         "3006"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 5,
+      "note": "Como el 3306, con 5 ventanas normales."
     },
     {
       "space_id": 7,
       "name": "space_0_7",
       "floor": 0,
-      "kind": "unknown",
+      "kind": "lab",
       "room": "3007",
       "alias": [
         "3007"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": null,
+      "note": "Salón doble: laboratorio de posproducción."
+    },
+    {
+      "space_id": 8,
+      "name": "space_0_8",
+      "floor": 0,
+      "room": "3008",
+      "alias": [
+        "3008"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "study_room",
+      "windows": 0,
+      "note": "Conjunto de 5 salas de estudio."
+    },
+    {
+      "space_id": 9,
+      "name": "space_0_9",
+      "floor": 0,
+      "room": "3009",
+      "alias": [
+        "3009"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "auditorium",
+      "windows": 0,
+      "note": "Aula magna."
+    },
+    {
+      "space_id": 10,
+      "name": "space_0_10",
+      "floor": 0,
+      "room": "3010",
+      "alias": [
+        "3010"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "editing_room",
+      "windows": null,
+      "note": "Sala de producción, isla de edición."
+    },
+    {
+      "space_id": 11,
+      "name": "space_0_11",
+      "floor": 0,
+      "kind": "medical",
+      "room": null,
+      "label": "Tec med",
+      "alias": [],
+      "windows": 0,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo. Del tamaño de un salón."
+    },
+    {
+      "space_id": 101,
+      "name": "space_1_1",
+      "floor": 1,
+      "room": "3101",
+      "alias": [
+        "3101"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "classroom",
+      "windows": 3
+    },
+    {
+      "space_id": 102,
+      "name": "space_1_2",
+      "floor": 1,
+      "room": "3102",
+      "alias": [
+        "3102"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "classroom",
+      "windows": 3
+    },
+    {
+      "space_id": 103,
+      "name": "space_1_3",
+      "floor": 1,
+      "room": "3103",
+      "alias": [
+        "3103"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "classroom",
+      "windows": 3
+    },
+    {
+      "space_id": 104,
+      "name": "space_1_4",
+      "floor": 1,
+      "room": "3104",
+      "alias": [
+        "3104"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "classroom",
+      "windows": 3
+    },
+    {
+      "space_id": 105,
+      "name": "space_1_5",
+      "floor": 1,
+      "room": "3105",
+      "alias": [
+        "3105"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "classroom",
+      "windows": 3
+    },
+    {
+      "space_id": 106,
+      "name": "space_1_6",
+      "floor": 1,
+      "room": "3106",
+      "alias": [
+        "3106"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "classroom",
+      "windows": 3
     },
     {
       "space_id": 107,
       "name": "space_1_7",
       "floor": 1,
-      "kind": "unknown",
+      "kind": "classroom",
       "room": "3107",
       "alias": [
         "3107"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 3
+    },
+    {
+      "space_id": 108,
+      "name": "space_1_8",
+      "floor": 1,
+      "room": "3108",
+      "alias": [
+        "3108"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "classroom",
+      "windows": null,
+      "note": "Del tamaño del 3206 y el 3205 juntos, con las ventanas de ambos."
+    },
+    {
+      "space_id": 109,
+      "name": "space_1_9",
+      "floor": 1,
+      "room": "3109",
+      "alias": [
+        "3109"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "classroom",
+      "windows": null,
+      "note": "3 × 7 × 8 (medidas por confirmar)."
     },
     {
       "space_id": 110,
       "name": "space_1_10",
       "floor": 1,
-      "kind": "unknown",
+      "kind": "classroom",
       "room": "3110",
       "alias": [
         "3110"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4,
+      "note": "Ventilación como la del 3306."
     },
     {
       "space_id": 111,
       "name": "space_1_11",
       "floor": 1,
-      "kind": "unknown",
+      "kind": "classroom",
       "room": "3111",
       "alias": [
         "3111"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4,
+      "note": "Ventilación como la del 3306."
+    },
+    {
+      "space_id": 112,
+      "name": "space_1_12",
+      "floor": 1,
+      "room": "3112",
+      "alias": [
+        "3112"
+      ],
+      "marker": null,
+      "dimensions": null,
+      "kind": "open_area",
+      "windows": null,
+      "note": "Área abierta."
+    },
+    {
+      "space_id": 113,
+      "name": "space_1_13",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina junto a las escaleras",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
+    },
+    {
+      "space_id": 114,
+      "name": "space_1_14",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina de dirección 1",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
+    },
+    {
+      "space_id": 115,
+      "name": "space_1_15",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina de dirección 2",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
+    },
+    {
+      "space_id": 116,
+      "name": "space_1_16",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina de dirección 3",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
+    },
+    {
+      "space_id": 117,
+      "name": "space_1_17",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina de dirección 4",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
+    },
+    {
+      "space_id": 118,
+      "name": "space_1_18",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina de dirección 5",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
+    },
+    {
+      "space_id": 119,
+      "name": "space_1_19",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina de dirección 6",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
+    },
+    {
+      "space_id": 120,
+      "name": "space_1_20",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina de dirección 7",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
+    },
+    {
+      "space_id": 121,
+      "name": "space_1_21",
+      "floor": 1,
+      "kind": "office",
+      "room": null,
+      "label": "oficina de dirección 8",
+      "alias": [],
+      "windows": null,
+      "marker": null,
+      "dimensions": null,
+      "note": "Sin número; id asignado al registrarlo."
     },
     {
       "space_id": 201,
@@ -142,7 +487,8 @@
         "3201"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 0
     },
     {
       "space_id": 202,
@@ -154,7 +500,8 @@
         "3202"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 0
     },
     {
       "space_id": 203,
@@ -166,7 +513,8 @@
         "3203"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 0
     },
     {
       "space_id": 204,
@@ -178,7 +526,8 @@
         "3204"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 0
     },
     {
       "space_id": 205,
@@ -190,7 +539,8 @@
         "3205"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 0
     },
     {
       "space_id": 206,
@@ -202,7 +552,8 @@
         "3206"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 0
     },
     {
       "space_id": 207,
@@ -214,7 +565,8 @@
         "3207"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 0
     },
     {
       "space_id": 208,
@@ -226,7 +578,8 @@
         "3208"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4
     },
     {
       "space_id": 209,
@@ -238,7 +591,8 @@
         "3209"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 2
     },
     {
       "space_id": 301,
@@ -252,7 +606,8 @@
       ],
       "marker": null,
       "dimensions": null,
-      "note": "Salón grande tipo auditorio. El 3302 no existe físicamente; probablemente es este mismo salón."
+      "note": "Salón tipo auditorio, al menos dos pantallas. El 3302 no existe físicamente; es el mismo salón.",
+      "windows": 5
     },
     {
       "space_id": 303,
@@ -264,7 +619,8 @@
         "3303"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4
     },
     {
       "space_id": 304,
@@ -276,7 +632,8 @@
         "3304"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4
     },
     {
       "space_id": 305,
@@ -288,7 +645,8 @@
         "3305"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4
     },
     {
       "space_id": 306,
@@ -300,7 +658,8 @@
         "3306"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4
     },
     {
       "space_id": 307,
@@ -310,11 +669,13 @@
       "room": "3307",
       "alias": [
         "3307",
-        "sala de cómputo",
-        "sala de computo"
+        "sala de computo",
+        "sala de cómputo"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4,
+      "note": "33 computadoras."
     },
     {
       "space_id": 308,
@@ -326,7 +687,8 @@
         "3308"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4
     },
     {
       "space_id": 309,
@@ -338,7 +700,8 @@
         "3309"
       ],
       "marker": null,
-      "dimensions": null
+      "dimensions": null,
+      "windows": 4
     },
     {
       "space_id": 401,
@@ -350,7 +713,8 @@
       "alias": [],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 402,
@@ -365,7 +729,8 @@
       ],
       "marker": null,
       "dimensions": null,
-      "note": "Los dos sensores del piso 4 (esp32_room_01 y esp32_room_02) están en esta oficina. Conserva el id 402 porque es el que tienen sus lecturas y el GRU."
+      "note": "Los dos sensores del piso 4 (esp32_room_01 y esp32_room_02) están en esta oficina. Conserva el id 402 porque es el que tienen sus lecturas y el GRU.",
+      "windows": null
     },
     {
       "space_id": 403,
@@ -377,7 +742,8 @@
       "alias": [],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 404,
@@ -389,7 +755,8 @@
       "alias": [],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 405,
@@ -401,7 +768,8 @@
       "alias": [],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 406,
@@ -413,7 +781,8 @@
       "alias": [],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 407,
@@ -425,7 +794,8 @@
       "alias": [],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 408,
@@ -439,7 +809,8 @@
       ],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 409,
@@ -453,7 +824,8 @@
       ],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 410,
@@ -467,7 +839,8 @@
       ],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     },
     {
       "space_id": 411,
@@ -481,7 +854,8 @@
       ],
       "marker": null,
       "dimensions": null,
-      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real."
+      "note": "Sin sensor. Nombre provisional: cambiar label por el nombre real.",
+      "windows": null
     }
   ]
 }
