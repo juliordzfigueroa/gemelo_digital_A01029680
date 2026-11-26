@@ -10,20 +10,22 @@ is the whole point of the retrieval-augmented pattern of section 4.3: the LLM
 is a writer, not a calculator, and it is given no opportunity to be anything
 else.
 
-What is wired and what is not. The GRU is real: the forecast comes from the
-trained checkpoint in models/. The data source is not: the three retrieval
-functions read the cleaned sensor file written by ingestion.cleaning, loaded at
-startup, because the Tec database is not reachable yet. So "current" means
-the latest reading in that file, not the present moment. They are marked `TODO E5` and are the only places that change
-when it is. The anomaly detector does not exist at all, and this module says
-so rather than reporting that nothing was found, which would be a different
-claim entirely.
+Where each step lives: llm/classifier.py reads the question, api/retrieval.py
+fetches the data, llm/context.py and llm/floor_prompt.py write the prompt,
+llm/llm_client.py talks to Ollama, and llm/replies.py holds every sentence the
+code writes on its own. This file only routes between them and serves the
+viewer.
+
+Usage, from the src/ directory:
+    uvicorn api.api:app --port 8000
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-05 - Answer questions about a whole floor.
+    2026-11-26 - Retrieval moved to api/retrieval.py; removed the space_id
+    field of the request, which no client sends since the viewer dropped
+    its space selector.
 
 Reference:
     Sections 4.3.1 to 4.3.4 of the research document.
@@ -32,7 +34,6 @@ Reference:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any
 
 import pandas as pd
 from fastapi import FastAPI
@@ -40,24 +41,12 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from api import retrieval as ret
 from common import config as cfg
 from common import data as dat
 from common import spaces
 from gru import predict as pred
 from llm import classifier, context, floor_prompt, llm_client, replies
-
-# Default span for a historical question when the user names no period.
-HISTORY_HOURS = 24
-
-# Process-wide state, populated once at startup. Reloading the checkpoint per
-# request would add seconds of latency to every question for no benefit.
-STATE: dict[str, Any] = {
-    "net": None,
-    "normalizer": None,
-    "metadata": None,
-    "data": None,
-    "model_error": None,
-}
 
 
 # --------------------------------------------------------------------------
@@ -67,26 +56,19 @@ class Question(BaseModel):
     """Body of a /chat or /context request."""
 
     question: str = Field(min_length=1, max_length=500)
-    space_id: int | None = Field(
-        default=None,
-        description=(
-            "Space selected in the viewer. Used when the question names "
-            "neither a space nor a floor; either one in the text wins."
-        ),
-    )
 
 
 class Answer(BaseModel):
-    """Body of a /chat response."""
+    """Body of a /chat response. The viewer reads every field."""
 
     response: str
     intent_type: str
-    space: int | None
+    space: int | None = None
     floor: int | None = None
     building: bool = False
-    horizon_min: int | None
-    forecast_method: str | None
-    warning: str | None
+    horizon_min: int | None = None
+    forecast_method: str | None = None
+    warning: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -108,28 +90,25 @@ async def lifespan_handler(app: FastAPI):
     """
     try:
         net, normalizer, metadata = pred.load_model()
-        STATE.update(net=net, normalizer=normalizer, metadata=metadata)
+        ret.STATE.update(net=net, normalizer=normalizer, metadata=metadata)
         print(f"GRU cargado: {net.n_parameters():,} parametros")
     except (FileNotFoundError, RuntimeError) as e:
-        STATE["model_error"] = str(e)
+        ret.STATE["model_error"] = str(e)
         print(f"ADVERTENCIA: el GRU no se pudo cargar: {e}")
 
     # TODO E5: replace with a connection to the Tec database. Everything
-    # downstream reads this frame through the three retrieval functions, so
-    # only they change.
+    # downstream reads this frame through retrieval.space_rows().
     try:
-        STATE["data"] = dat.load_data()
-        data = STATE["data"]
+        data = dat.load_data()
         print(
             f"Datos en memoria: {len(data):,} filas, espacios "
             f"{sorted(data[cfg.SPACE_COLUMN].unique())}, hasta "
             f"{data[cfg.TIME_COLUMN].max()}"
         )
     except FileNotFoundError as e:
-        STATE["data"] = pd.DataFrame(
-            columns=[cfg.TIME_COLUMN, cfg.SPACE_COLUMN, *cfg.ACTIVE_VARIABLES]
-        )
+        data = pd.DataFrame(columns=[cfg.TIME_COLUMN, cfg.SPACE_COLUMN, *cfg.ACTIVE_VARIABLES])
         print(f"ADVERTENCIA: sin datos: {e}")
+    ret.STATE["data"] = data
     yield
 
 
@@ -147,403 +126,20 @@ if cfg.VIEWER_DIR.is_dir():
 
 
 # --------------------------------------------------------------------------
-# Data retrieval
+# Routing
 # --------------------------------------------------------------------------
-def _space_rows(space_id: int) -> pd.DataFrame:
-    """Return every row of one space, sorted by time.
-
-    TODO E5: replace with a query to the Tec database.
-
-    Args:
-        space_id: Space identifier.
-
-    Returns:
-        The rows for that space, possibly empty.
-    """
-    data = STATE["data"]
-    own_rows = data[data[cfg.SPACE_COLUMN] == space_id]
-    return own_rows.sort_values(cfg.TIME_COLUMN).reset_index(drop=True)
-
-
-def _current_data(space_id: int) -> dict:
-    """Retrieve the latest reading of one space.
-
-    TODO E5: replace with a query to `lecturas_agregadas` for the most recent
-    row of that space.
-
-    Args:
-        space_id: Space identifier.
-
-    Returns:
-        A dict shaped for context._prompt_current.
-    """
-    rows = _space_rows(space_id)
-    if rows.empty:
-        return {"space": space_id, "readings": {}, "timestamp": None}
-
-    last = rows.iloc[-1]
-    return {
-        "space": space_id,
-        "timestamp": str(last[cfg.TIME_COLUMN]),
-        "readings": {
-            variable: _number(last[variable])
-            for variable in cfg.ACTIVE_VARIABLES
-        },
-    }
-
-
-def _history_data(
-    space_id: int, variable: str, hours: int = HISTORY_HOURS
-) -> dict:
-    """Summarize one variable of one space over a past window.
-
-    TODO E5: replace with a ranged query to `lecturas_agregadas`.
-
-    Args:
-        space_id: Space identifier.
-        variable: Which variable to summarize.
-        horas: How far back to look.
-
-    Returns:
-        A dict shaped for context._prompt_history.
-    """
-    rows = _space_rows(space_id)
-    if rows.empty:
-        return {"space": space_id, "variable": variable, "summary": {}}
-
-    stamps = pd.to_datetime(rows[cfg.TIME_COLUMN])
-    cutoff = stamps.max() - pd.Timedelta(hours=hours)
-    recent = rows[stamps >= cutoff]
-    series = recent[variable].dropna()
-
-    return {
-        "space": space_id,
-        "variable": variable,
-        "since": str(cutoff),
-        "until": str(stamps.max()),
-        "summary": {
-            "max": _number(series.max()) if len(series) else None,
-            "min": _number(series.min()) if len(series) else None,
-            "mean": _number(series.mean()) if len(series) else None,
-            "n_readings": int(len(series)),
-        },
-    }
-
-
-def _anomaly_data(space_id: int) -> dict:
-    """Report what the anomaly detector found.
-
-    TODO E5: replace with a call to the anomaly detector once it exists.
-
-    Until then this returns "no_disponible" rather than an empty list of
-    anomalies. The distinction matters: an empty list means the detector ran
-    and found nothing, and claiming that while no detector exists would put a
-    false all-clear in front of the user.
-
-    Args:
-        space_id: Space identifier.
-
-    Returns:
-        A dict shaped for context._prompt_anomaly.
-    """
-    return {
-        "space": space_id,
-        "state": "unavailable",
-        "anomalies": [],
-        "detail": (
-            "El detector de anomalías (regla 3σ) todavía no está implementado, "
-            "así que no se ha evaluado si hay anomalías."
-        ),
-    }
-
-
-def _forecast_data(intent: classifier.Intent, space_id: int) -> dict:
-    """Run the GRU forward for one space.
-
-    Args:
-        intencion: The classified question, which carries the horizon.
-        space_id: Space identifier.
-
-    Returns:
-        A dict shaped for context._prompt_forecast. When the model or a
-        usable window is unavailable it carries an "error" key instead of
-        predictions, so the prompt can say so plainly.
-    """
-    if STATE["net"] is None:
-        return {
-            "space": space_id,
-            "current_reading": {},
-            "predictions": [],
-            "error": (
-                "El modelo GRU no está cargado: "
-                f"{STATE['model_error']}"
-            ),
-        }
-
-    metadata = STATE["metadata"]
-    rows = _space_rows(space_id)
-    window = pred.last_contiguous_window(rows, metadata["input_steps"])
-
-    if window is None:
-        return {
-            "space": space_id,
-            "current_reading": {},
-            "predictions": [],
-            "error": (
-                f"No hay {metadata['input_steps']} lecturas consecutivas "
-                "recientes, así que no se puede predecir."
-            ),
-        }
-
-    try:
-        output = pred.predict(
-            STATE["net"],
-            STATE["normalizer"],
-            metadata,
-            window,
-            space_id=space_id,
-            horizon_min=intent.horizon_min,
-        )
-    except ValueError as e:
-        return {
-            "space": space_id,
-            "current_reading": {},
-            "predictions": [],
-            "error": str(e),
-        }
-
-    last = window.iloc[-1]
-    return {
-        "space": space_id,
-        "current_reading": {
-            variable: _number(last[variable])
-            for variable in metadata["active_variables"]
-        },
-        "timestamp": str(last[cfg.TIME_COLUMN]),
-        **output,
-    }
-
-
-def _number(value: object) -> float | None:
-    """Coerce a pandas scalar to a plain float for JSON.
-
-    Args:
-        valor: Value taken from a DataFrame.
-
-    Returns:
-        The value as a rounded float, or None when it is missing.
-    """
-    if value is None or pd.isna(value):
-        return None
-    return round(float(value), 2)
-
-
-# --------------------------------------------------------------------------
-# Floor questions
-# --------------------------------------------------------------------------
-def _floor_summary(rooms: list[dict], key: str, variables: list[str]) -> dict:
-    """Mean, minimum and maximum of each variable across the rooms of a floor.
-
-    Computed here and not by the LLM, like every other number in the answer.
-
-    Args:
-        rooms: One entry per room, each holding a dict of values under `key`.
-        key: Which dict of each room to summarize.
-        variables: Variables to summarize.
-
-    Returns:
-        Per variable: mean, min and max, each extreme with the room it is in,
-        and how many rooms had a value.
-    """
-    summary = {}
-    for variable in variables:
-        pairs = [
-            (room[key][variable], room["room"])
-            for room in rooms
-            if room.get(key, {}).get(variable) is not None
-        ]
-        if not pairs:
-            continue
-        values = [v for v, _ in pairs]
-        low, high = min(pairs), max(pairs)
-        summary[variable] = {
-            "mean": round(sum(values) / len(values), 2),
-            "min": low[0], "min_room": low[1],
-            "max": high[0], "max_room": high[1],
-            "n_rooms": len(pairs),
-        }
-    return summary
-
-
-def _floor_data(intent: classifier.Intent, floor: int | None) -> dict:
-    """Retrieve what a question about a whole floor, or the building, needs.
-
-    Runs the same per-space retrieval as a single-space question for every
-    space that has readings, and adds a summary. Spaces without a sensor are
-    named so the answer can say the floor is only partly measured.
-
-    TODO E5: inherits the stand-in data source of the per-space functions.
-
-    Args:
-        intent: The classified question; carries the kind, the variables
-            and, for forecasts, the horizon.
-        floor: Floor number, or None for every space in the building.
-
-    Returns:
-        A dict shaped for context._prompt_floor, with "scope" set to
-        "floor" or "building".
-    """
-    labels = spaces.labels()
-    if floor is None:
-        space_ids = sorted(s for spaces in classifier.FLOOR_SPACES.values() for s in spaces)
-    else:
-        space_ids = sorted(classifier.FLOOR_SPACES.get(floor, []))
-    variables = intent.variables or list(cfg.ACTIVE_VARIABLES)
-    data: dict[str, Any] = {
-        "scope": "building" if floor is None else "floor",
-        "floor": floor,
-        "kind": intent.kind,
-        "variables": variables,
-        "n_spaces": len(space_ids),
-        "rooms": [],
-        "without_data": [],
-        "errors": [],
-    }
-
-    if intent.kind == "anomaly":
-        data["state"] = "unavailable"
-        data["detail"] = _anomaly_data(space_ids[0] if space_ids else 0)["detail"]
-        return data
-
-    if intent.kind == "history":
-        # Same limit as the single-space path: one variable per question.
-        variables = [intent.variables[0] if intent.variables else "co2"]
-        data["variables"] = variables
-
-    for space_id in space_ids:
-        room = labels.get(space_id, str(space_id))
-        if _space_rows(space_id).empty:
-            data["without_data"].append(room)
-            continue
-
-        if intent.kind == "forecast":
-            item = _forecast_data(intent, space_id)
-            if item.get("error"):
-                reason = item["error"].split(", así que")[0].rstrip(".")
-                data["errors"].append({"room": room, "reason": reason[:1].lower() + reason[1:]})
-                continue
-            last = item["predictions"][-1] if item["predictions"] else {}
-            data["rooms"].append({
-                "room": room,
-                "current": {v: item["current_reading"].get(v) for v in variables},
-                "predicted": {v: _number(last.get(v)) for v in variables},
-            })
-            data["timestamp"] = item.get("timestamp")
-            data["horizon_min"] = item.get("horizon_min")
-            data["method"] = item.get("method")
-            data["warning"] = item.get("warning")
-        elif intent.kind == "history":
-            item = _history_data(space_id, variables[0])
-            data["rooms"].append({"room": room, "summary": item["summary"]})
-            data["since"], data["until"] = item.get("since"), item.get("until")
-        else:
-            item = _current_data(space_id)
-            data["rooms"].append({
-                "room": room,
-                "timestamp": item["timestamp"],
-                "readings": {v: item["readings"].get(v) for v in variables},
-            })
-
-    if intent.kind == "forecast":
-        data["summary"] = _floor_summary(data["rooms"], "predicted", variables)
-    elif intent.kind == "history":
-        summaries = data["rooms"]
-        variable = variables[0]
-        maxima = [(r["summary"]["max"], r["room"]) for r in summaries if r["summary"].get("max") is not None]
-        minima = [(r["summary"]["min"], r["room"]) for r in summaries if r["summary"].get("min") is not None]
-        means = [r["summary"]["mean"] for r in summaries if r["summary"].get("mean") is not None]
-        data["summary"] = {variable: {
-            "max": max(maxima)[0] if maxima else None,
-            "max_room": max(maxima)[1] if maxima else None,
-            "min": min(minima)[0] if minima else None,
-            "min_room": min(minima)[1] if minima else None,
-            "mean": round(sum(means) / len(means), 2) if means else None,
-            "n_rooms": len(summaries),
-        }}
-    else:
-        data["summary"] = _floor_summary(data["rooms"], "readings", variables)
-        stamps = [r["timestamp"] for r in data["rooms"] if r["timestamp"]]
-        data["timestamp"] = max(stamps) if stamps else None
-    return data
-
-
-# --------------------------------------------------------------------------
-# Orchestration
-# --------------------------------------------------------------------------
-def _retrieve(intent: classifier.Intent, space_id: int) -> dict:
-    """Fetch whatever the classified intent needs.
-
-    Args:
-        intencion: Result of classifier.clasificar().
-        space_id: Space to answer about.
-
-    Returns:
-        The data dict for context.build_prompt().
-    """
-    if intent.kind == "forecast":
-        data = _forecast_data(intent, space_id)
-    elif intent.kind == "history":
-        variable = intent.variables[0] if intent.variables else "co2"
-        data = _history_data(space_id, variable)
-    elif intent.kind == "anomaly":
-        data = _anomaly_data(space_id)
-    else:
-        data = _current_data(space_id)
-    # The prompt names the space by its room number: given the id, Llama
-    # answered "espacio 308" and, with the old ids, "espacio 5".
-    data["space"] = spaces.labels().get(space_id, space_id)
-    return data
-
-
-def _chosen_space(intent: classifier.Intent, requested: int | None) -> int:
-    """Decide which space the answer is about.
-
-    A space named in the question wins over the one selected in the viewer,
-    because the text is the more explicit signal. With neither, the first
-    space the model knows is used so the request still produces an answer.
-
-    Args:
-        intencion: The classified question.
-        pedido: Space id sent in the request body, if any.
-
-    Returns:
-        The space id to answer about.
-    """
-    if intent.space_id is not None:
-        return intent.space_id
-    if requested is not None:
-        return requested
-    metadata = STATE["metadata"]
-    if metadata:
-        return min(int(k) for k in metadata["space_index"])
-    return int(STATE["data"][cfg.SPACE_COLUMN].min())
-
-
-def _target_and_data(
-    intent: classifier.Intent, requested: int | None
-) -> tuple[int | None, int | None, dict]:
+def _target_and_data(intent: classifier.Intent) -> tuple[int | None, int | None, dict]:
     """Decide what the answer is about, and fetch it.
 
     Order of precedence: a space named in the text, an unknown room number,
-    a floor, the whole building, and last the space sent in the request
-    body. Several outcomes need no LLM at all and come back as a "direct"
-    sentence: an off-topic question, no target, an unknown room, or a room
-    without a sensor. A fixed sentence there is both faster and safer than
+    a floor, the whole building. Several outcomes need no LLM at all and come
+    back as a "direct" sentence: a room without a sensor, an unknown room, a
+    message that is not a question about the building, or a question that
+    does not say where. A fixed sentence there is both faster and safer than
     asking the model to explain an absence.
 
     Args:
         intent: The classified question.
-        requested: Space id sent in the request body, if any.
 
     Returns:
         The space id (None unless the answer is about one space), the floor
@@ -551,91 +147,29 @@ def _target_and_data(
         either the input for context.build_prompt() or a "direct" answer.
     """
     question = intent.original_text
-    if intent.space_id is None:
-        if intent.unknown_room:
-            return None, None, {"direct": _unknown_room_message(intent.unknown_room, question)}
-        if intent.floor is not None:
-            return None, intent.floor, _floor_data(intent, intent.floor)
-        if intent.building:
-            return None, None, _floor_data(intent, None)
-        if intent.chat:
-            return None, None, {"direct": replies.reply(intent.chat, question)}
-        if requested is None:
-            # A building question that does not say where. Answering about a
-            # default space would report on a room the user never asked about.
-            return None, None, {"direct": replies.reply("ask_target", question)}
+    space = intent.space_id
 
-    space = _chosen_space(intent, requested)
-    if _space_rows(space).empty:
-        return space, None, {"direct": _no_sensor_message(space, question)}
-    return space, None, _retrieve(intent, space)
+    if space is not None:
+        if ret.space_rows(space).empty:
+            label = str(spaces.labels().get(space, space))
+            text = replies.no_sensor(label, spaces.aliases(space), ret.rooms_with_data(), question)
+            return space, None, {"direct": text}
+        return space, None, ret.retrieve(intent, space)
 
-
-def _with_article(label: str) -> str:
-    """Put the right article before a space label: "el 3309", "la oficina 4-1"."""
-    return f"la {label}" if label.startswith("oficina") else f"el {label}"
-
-
-def _rooms_with_data() -> list[str]:
-    """Return the labels of the spaces that have readings, sorted."""
-    labels = spaces.labels()
-    ids = sorted(int(s) for s in STATE["data"][cfg.SPACE_COLUMN].unique())
-    return [str(labels.get(s, s)) for s in ids]
-
-
-def _unknown_room_message(number: str, question: str = "") -> str:
-    """Say that a room number is not in the registry, and what is.
-
-    Args:
-        number: The four-digit number from the question.
-        question: The question as typed, to pick the wording.
-
-    Returns:
-        A sentence for the user.
-    """
-    if not number.startswith("3"):
-        return replies.reply("unknown_room_other_building", question, number=number)
-    floor = int(number[1])
-    if floor not in classifier.FLOOR_SPACES:
-        return replies.reply(
-            "unknown_room_no_floor", question, number=number,
-            top_floor=max(classifier.FLOOR_SPACES),
+    if intent.unknown_room:
+        text = replies.unknown_room(
+            intent.unknown_room, question, classifier.FLOOR_SPACES, spaces.labels()
         )
-    labels = spaces.labels()
-    known = replies.spoken_list(
-        [str(labels[s]) for s in sorted(classifier.FLOOR_SPACES[floor])]
-    )
-    where = "la planta baja" if floor == 0 else f"el piso {floor}"
-    return replies.reply(
-        "unknown_room_floor", question, number=number, where=where, known=known
-    )
-
-
-def _no_sensor_message(space_id: int, question: str = "") -> str:
-    """Say that a registered space has no readings, and which spaces do.
-
-    Args:
-        space_id: A space with no rows in the data.
-        question: The question as typed. When it named the space by another
-            number (the 3302 is the 3301), the answer says so.
-
-    Returns:
-        A sentence for the user.
-    """
-    label = str(spaces.labels().get(space_id, space_id))
-    aliases = spaces.aliases(space_id)
-    asked = next(
-        (a for a in aliases if a != label and a.isdigit() and a in question.lower()), None
-    )
-    rooms = replies.spoken_list(
-        [_with_article(r) if r.startswith("oficina") else r for r in _rooms_with_data()]
-    )
-    if asked:
-        return replies.reply("no_sensor_alias", question, asked=asked, label=label, rooms=rooms)
-    named = _with_article(label)
-    return replies.reply(
-        "no_sensor", question, subject=named[:1].upper() + named[1:], rooms=rooms
-    )
+        return None, None, {"direct": text}
+    if intent.floor is not None:
+        return None, intent.floor, ret.floor_data(intent, intent.floor)
+    if intent.building:
+        return None, None, ret.floor_data(intent, None)
+    if intent.chat:
+        return None, None, {"direct": replies.reply(intent.chat, question)}
+    # A building question that does not say where. Answering about a default
+    # space would report on a room the user never asked about.
+    return None, None, {"direct": replies.reply("ask_target", question)}
 
 
 # --------------------------------------------------------------------------
@@ -650,11 +184,11 @@ def health() -> dict:
         raises: a health check that fails to respond is useless.
     """
     ready, reason = llm_client.available()
-    data = STATE["data"]
+    data = ret.STATE["data"]
     return {
         "status": "ok",
-        "gru_loaded": STATE["net"] is not None,
-        "model_error": STATE["model_error"],
+        "gru_loaded": ret.STATE["net"] is not None,
+        "model_error": ret.STATE["model_error"],
         "ollama_required": True,
         "ollama_ready": ready,
         "ollama_detail": reason,
@@ -674,10 +208,6 @@ def root() -> RedirectResponse:
 def get_spaces() -> dict:
     """List the floors and spaces the viewer draws, with their latest reading.
 
-    The registry is read on every call rather than at startup, so a marker
-    measured in Potree and written to spaces.json shows up on reload without
-    restarting the API.
-
     Returns:
         The scan server address, the floor clouds, and every space with its
         marker, dimensions and latest reading (empty when it has no sensor).
@@ -685,7 +215,7 @@ def get_spaces() -> dict:
     registry = spaces.read()
     output = []
     for space in registry["spaces"]:
-        current = _current_data(int(space["space_id"]))
+        current = ret.current_data(int(space["space_id"]))
         output.append({
             "space_id": space["space_id"],
             "name": space["name"],
@@ -697,11 +227,7 @@ def get_spaces() -> dict:
             "timestamp": current["timestamp"],
             "readings": current["readings"],
         })
-    return {
-        "scans_url": cfg.SCANS_URL,
-        "floors": registry["floors"],
-        "spaces": output,
-    }
+    return {"scans_url": cfg.SCANS_URL, "floors": registry["floors"], "spaces": output}
 
 
 @app.get("/spaces/registry")
@@ -727,16 +253,15 @@ def context_for(question: Question) -> dict:
     the model instead of guessing between them.
 
     Args:
-        pregunta: The request body.
+        question: The request body.
 
     Returns:
         The classified intent, the retrieved data and both prompts.
     """
     intent = classifier.classify(question.question)
-    space, floor, data = _target_and_data(intent, question.space_id)
-    if data.get("direct"):
-        system, user = None, None
-    else:
+    space, floor, data = _target_and_data(intent)
+    system, user = None, None
+    if not data.get("direct"):
         system, user = context.build_prompt(intent, data)
 
     return {
@@ -760,44 +285,40 @@ def chat(question: Question) -> Answer:
     """Answer one question about the building.
 
     Args:
-        pregunta: The request body.
+        question: The request body.
 
     Returns:
         The generated sentence plus the routing decisions that produced it, so
-        the caller can show what the answer was based on.
+        the viewer can show what the answer was based on.
     """
     intent = classifier.classify(question.question)
-    space, floor, data = _target_and_data(intent, question.space_id)
+    space, floor, data = _target_and_data(intent)
     if data.get("direct"):
-        return Answer(
-            response=data["direct"], intent_type=intent.kind, space=space,
-            floor=None, horizon_min=None, forecast_method=None, warning=None,
-        )
-    system, user = context.build_prompt(intent, data)
+        return Answer(response=data["direct"], intent_type=intent.kind, space=space)
 
+    system, user = context.build_prompt(intent, data)
     try:
         response = llm_client.generate_answer(system, user)
     except RuntimeError as e:
         # Returned as a normal body rather than a 5xx: the chain did its work
-        # and the caller is better served by a sentence explaining what is
+        # and the user is better served by a sentence explaining what is
         # missing than by an error the viewer has to interpret.
         response = f"No puedo responder ahora mismo. {e}"
     else:
+        # A floor answer: the model wrote the summary, the code adds the
+        # room-by-room detail.
         detail = floor_prompt.detail(data) if data.get("scope") else ""
         if detail:
             response = f"{response.rstrip()}\n\n{detail}"
 
+    is_forecast = intent.kind == "forecast"
     return Answer(
         response=response,
         intent_type=intent.kind,
         space=space,
         floor=floor,
         building=data.get("scope") == "building",
-        horizon_min=(
-            data.get("horizon_min") if intent.kind == "forecast" else None
-        ),
-        forecast_method=(
-            data.get("method") if intent.kind == "forecast" else None
-        ),
+        horizon_min=data.get("horizon_min") if is_forecast else None,
+        forecast_method=data.get("method") if is_forecast else None,
         warning=data.get("warning") or data.get("error") or data.get("detail"),
     )
