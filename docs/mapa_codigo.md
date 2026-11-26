@@ -8,7 +8,7 @@ unas preguntas para comprobar que se entendió. Los números de línea son del
 | Parte | Carpetas | Estado de esta guía |
 |---|---|---|
 | Escaneos y visor (Potree) | `src/scans/`, `web/`, partes de `src/api/` | **completa** |
-| Capa conversacional | `src/llm/`, `src/api/` | pendiente |
+| Capa conversacional | `src/llm/`, `src/api/`, `src/common/spaces.py` | **completa** |
 | Modelo predictivo y su preparación de datos | `src/gru/`, `src/sarimax/`, `src/common/` | **completa** |
 | Ingesta (limpieza, horario, clima) | `src/ingestion/` | **completa** |
 
@@ -74,7 +74,7 @@ Navegador ── index.html + viewer.js ◄── API :8000 (sirve la página y 
    Qué buscar: para cada piso, `cloud` (dónde está su octree) y `transform`
    (cuánto se gira y mueve). Es la única "base de datos" de los pisos.
 
-2. **[src/common/config.py](../src/common/config.py), líneas 39 a 66.**
+2. **[src/common/config.py](../src/common/config.py), líneas 40 a 67.**
    Qué buscar: las rutas y direcciones (`SCANS_DIR`, `SCANS_URL`,
    `VIEWER_ORIGINS`). Todas se leen de variables de entorno con un valor por
    omisión; así el mismo código corre en otra máquina sin tocarlo.
@@ -104,10 +104,10 @@ Navegador ── index.html + viewer.js ◄── API :8000 (sirve la página y 
      `send_file`, que igual entiende rangos.
 
 6. **[src/api/api.py](../src/api/api.py), solo las partes del visor.**
-   - Línea 149: `app.mount("/viewer", ...)` sirve la carpeta `web/` como
+   - Línea 125: `app.mount("/viewer", ...)` sirve la carpeta `web/` como
      página.
-   - `root` (línea 697): abrir `localhost:8000` manda al visor.
-   - `spaces` (línea 703): la ruta `/spaces`, que le da al visor la dirección
+   - `root` (línea 202): abrir `localhost:8000` manda al visor.
+   - `get_spaces` (línea 208): la ruta `/spaces`, que le da al visor la dirección
      del servidor de escaneos, la lista de pisos y los salones con su última
      lectura.
 
@@ -396,3 +396,121 @@ del 308. 2) No: `invalidate` solo vacía la variable afectada. 3) Por
 días entre semana de su rango. 5) Porque la relativa depende de la
 temperatura: el mismo aire marca ~95% afuera y ~46% adentro, ya calentado; el
 balance de humedad se escribe en g/m³.
+
+---
+
+## Capa conversacional (el chat)
+
+### Las ideas
+
+**El modelo redacta, el código calcula.** Es el patrón RAG de la sección 4.3.
+Llama 3.1 8B corre local en Ollama. La API busca los números (lecturas,
+pronóstico del GRU, promedios del piso), los mete en el prompt y Llama solo
+escribe la frase. Nunca se le pide sumar, comparar ni estimar: un modelo de
+lenguaje que hace aritmética da respuestas fluidas y equivocadas.
+
+**Intención.** Cada pregunta se clasifica en dos cosas: el **tipo** (lectura
+actual, pronóstico, historial o anomalía) y el **lugar** (un salón, un piso o
+todo el edificio). Se hace con reglas de palabras, no con el LLM, para que la
+misma pregunta siempre siga el mismo camino.
+
+**Respuestas directas.** Cuando no hay datos que redactar (un saludo, algo
+fuera de tema, un salón que no existe o que no tiene sensor, una pregunta que
+no dice dónde), el código contesta con frases fijas y Llama ni se entera.
+
+**Dos prompts.** El de sistema son las reglas fijas (máximo 3 oraciones, solo
+los datos recibidos, con unidades). El de usuario lleva la pregunta y los
+datos de esa pregunta.
+
+**Piso o edificio.** Llama escribe solo el resumen, en una o dos oraciones, a
+partir del promedio y los salones extremos que calculó la API. La línea de
+cada salón la escribe el código y se pega después.
+
+**El estado.** Al arrancar, la API carga una vez el GRU y los datos en
+`retrieval.STATE`. Es lo mismo que la variable global `model` de tus
+servidores Flask.
+
+### Cómo viaja una pregunta
+
+```
+"¿Cómo va a estar el piso 3 en una hora?"
+   │
+   ├─ classifier.classify          tipo forecast, piso 3, horizonte 60 min
+   ├─ api._target_and_data         ¿salón? ¿número desconocido? ¿piso? ¿edificio? ¿charla?
+   ├─ retrieval.floor_data         GRU salón por salón, más promedio, mínimo y máximo
+   ├─ context.build_prompt         como es un piso, lo escribe floor_prompt.prompt
+   ├─ llm_client.generate_answer   Llama escribe una o dos oraciones
+   ├─ floor_prompt.detail          el código agrega una línea por salón
+   └─ Answer                       el visor muestra el texto y deja visible el piso 3
+```
+
+### Orden de lectura
+
+1. **[src/api/api.py](../src/api/api.py).** Es como tu servidor Flask: la
+   aplicación y sus rutas.
+   - `Question` y `Answer` (líneas 55 y 61): lo que manda y recibe el visor.
+   - `_target_and_data` (línea 131): el ruteo. Lee los `if` en orden: salón,
+     número desconocido, piso, edificio, charla, y al final "¿de qué salón?".
+   - `chat` (línea 284): la cadena completa de una pregunta.
+
+2. **[src/llm/classifier.py](../src/llm/classifier.py)** y
+   **[src/llm/vocabulary.py](../src/llm/vocabulary.py).**
+   - `classify` (línea 92): junta todo en un `Intent`.
+   - `_detect_kind` (línea 175): la prioridad anomalía > pronóstico > historial
+     > actual.
+   - `_extract_space`, `_extract_floor` y `_extract_horizon` (líneas 241, 256
+     y 310): el salón, el piso y los minutos.
+   - `_detect_chat` (línea 140): saludo, agradecimiento o fuera de tema.
+   - `vocabulary.py` son solo las listas de palabras; ahí se agregan
+     sinónimos.
+
+3. **[src/api/retrieval.py](../src/api/retrieval.py).** De dónde salen los
+   números.
+   - `STATE` (línea 50) y `space_rows` (línea 62): la única función que
+     cambia cuando llegue la base de datos del Tec (`TODO E5`).
+   - `current_data`, `history_data` y `forecast_data` (líneas 100, 124 y
+     177): un salón.
+   - `floor_data` (línea 258): un piso o el edificio; `_floor_summary` (línea
+     359) calcula el promedio y los extremos.
+
+4. **[src/llm/context.py](../src/llm/context.py).** Los prompts de un salón.
+   `SYSTEM_PROMPT` (línea 41) son las reglas; `build_prompt` (línea 57) elige
+   qué prompt armar.
+
+5. **[src/llm/floor_prompt.py](../src/llm/floor_prompt.py).** El prompt de un
+   piso (`prompt`, línea 51) y el detalle por salón (`detail`, línea 167).
+
+6. **[src/llm/formatting.py](../src/llm/formatting.py).** Cómo se escriben los
+   números. `threshold_notes` (línea 129) pone las etiquetas "ALTO" o "por
+   encima del rango de confort"; `trend` (línea 165) escribe "sube 62.8 ppm".
+
+7. **[src/llm/replies.py](../src/llm/replies.py).** Las frases fijas.
+   `TEMPLATES` (línea 38) trae las plantillas; `reply` (línea 91) escoge una
+   de las versiones con un hash de la pregunta, así que la misma pregunta
+   recibe siempre la misma frase.
+
+8. **[src/llm/llm_client.py](../src/llm/llm_client.py).** El POST a Ollama
+   (`generate_answer`, línea 56) y la revisión de que esté encendido
+   (`available`, línea 117).
+
+9. **[src/common/spaces.py](../src/common/spaces.py).** El registro de
+   salones: `labels` (línea 39) convierte 308 en "3308" y `space_4_2` en
+   "oficina 4-2".
+
+### Preguntas para comprobar
+
+1. Si Ollama está apagado y preguntas "¿cómo está el 3308?", ¿qué responde el
+   chat y en qué función se decide?
+2. ¿Por qué "¿qué método usas?" no se va a todo el edificio, aunque "método"
+   contiene "todo"?
+3. Quieres que "bochorno" cuente como temperatura. ¿Qué archivo cambias?
+4. En la respuesta de un piso, ¿quién escribe "sube 62.8 ppm": Llama o el
+   código?
+5. Cuando llegue la base de datos del Tec, ¿qué función cambias?
+
+Respuestas: 1) "No puedo responder ahora mismo." seguido de la razón; se
+decide en `chat`, en el `except RuntimeError` (línea 302 de `api.py`). 2)
+Porque las palabras de edificio se buscan como palabras completas, con
+`_contains_word`. 3) `llm/vocabulary.py`: se agrega a
+`VARIABLE_SYNONYMS["temperature"]`. 4) El código: `formatting.trend`. 5)
+`space_rows`, en `api/retrieval.py`.

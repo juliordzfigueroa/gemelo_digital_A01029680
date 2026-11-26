@@ -65,8 +65,7 @@ recibe la misma respuesta y una demostración se puede repetir.
 | Alias | "3302" | Que corresponde al 3301 (el 3302 no existe físicamente) |
 
 Si el texto nombra un salón y un piso ("el 3308 del piso 3"), gana el salón.
-`POST /chat` acepta además un `space_id` para clientes que tengan un salón
-seleccionado; el texto gana sobre él. El visor no lo manda.
+El lugar sale siempre del texto: la petición solo lleva la pregunta.
 
 Cómo distingue los casos sin lugar (`classifier._detect_chat`): las peticiones
 de chatbot general ("escribe", "explícame", "poema", "capital de", "opinas"…)
@@ -105,13 +104,21 @@ veces omite el nombre del salón extremo en el resumen.
 Una pregunta recorre cuatro pasos y cada uno tiene un dueño distinto:
 
 ```
-classifier.py   decide de qué tipo es la pregunta       (reglas, sin LLM)
-api/api.py      recupera los datos que ese tipo pide    (GRU, BD, detector)
-context.py      arma el prompt con esos datos           (plantillas)
-                y escribe el detalle por salón
-llm_client.py   pide la frase al modelo                 (HTTP a Ollama)
-replies.py      frases fijas de la herramienta          (sin LLM)
+llm/classifier.py     decide de qué tipo es la pregunta y de dónde   (reglas, sin LLM)
+llm/vocabulary.py       las palabras que busca el clasificador
+api/retrieval.py      recupera los datos que ese tipo pide           (GRU, datos, detector)
+llm/context.py        arma el prompt de un salón                     (plantillas)
+llm/floor_prompt.py   arma el prompt de un piso o del edificio,
+                        y escribe el detalle por salón
+llm/formatting.py       cómo se escriben números, rangos y tendencias
+llm/llm_client.py     pide la frase al modelo                        (HTTP a Ollama)
+llm/replies.py        frases fijas de la herramienta                 (sin LLM)
+api/api.py            rutea entre todos los anteriores y sirve el visor
 ```
+
+El registro de salones (`config/spaces.json`) se lee en un solo lugar,
+`common/spaces.py`: los nombres para el clasificador, la etiqueta de cada
+espacio ("3308", "oficina 4-2") y a qué piso pertenece.
 
 **Todos los números salen de los tres primeros pasos. El LLM solo redacta.**
 Nunca se le pide calcular, comparar entre espacios ni estimar lo que falta,
@@ -147,6 +154,11 @@ y codifica urgencia, no precisión. La consecuencia visible:
 Arreglarlo de verdad necesita un clasificador entrenado, no una lista de
 palabras más larga. Mientras tanto se prefiere errar hacia la seguridad.
 
+Las palabras viven en `llm/vocabulary.py` y las reglas en
+`llm/classifier.py`: para que se reconozca un sinónimo nuevo basta con
+agregarlo a la lista correspondiente. No hay lista para "lectura actual": es lo
+que recibe cualquier pregunta sin palabras de anomalía, pronóstico o historial.
+
 Para ver el ruteo completo:
 
 ```powershell
@@ -168,20 +180,20 @@ python -m llm.classifier
 | Detector de anomalías 3σ | **no existe** |
 | Llama 3.1 8B | **real**, vía Ollama (3 a 7 s por respuesta en la RTX 4090) |
 
-Los tres métodos marcados `TODO E5` en `api/api.py` son los únicos que cambian
-cuando haya acceso a la base de datos del Tec: `_space_rows()`,
-`_current_data()` y `_history_data()`. El resto del orquestador, incluidas las
-preguntas por piso, se apoya en ellos y no se toca.
+Cuando haya acceso a la base de datos del Tec, lo único que cambia es
+`space_rows()` en `api/retrieval.py`, marcado `TODO E5`: todo lo demás,
+incluidas las preguntas por piso, lee los datos a través de esa función.
 
 ### Sobre el detector que no existe
 
-`_anomaly_data()` devuelve `state: "unavailable"`, **no una lista vacía de
-anomalías**. La distinción no es cosmética: una lista vacía significa que el
-detector corrió y no encontró nada, y afirmar eso mientras no hay detector le
-pondría al usuario un «todo bien» falso enfrente. Esa es exactamente la
-respuesta que esta capa no debe producir nunca. El prompt de anomalías tiene
-una rama para ese estado que le ordena al modelo decir que la capacidad no
-está disponible.
+`anomaly_data()` (en `api/retrieval.py`) devuelve `state: "unavailable"`,
+**no una lista vacía de anomalías**. La distinción no es cosmética: una lista
+vacía significa que el detector corrió y no encontró nada, y afirmar eso
+mientras no hay detector le pondría al usuario un «todo bien» falso enfrente.
+Esa es exactamente la respuesta que esta capa no debe producir nunca. El prompt
+de anomalías (`context._prompt_anomaly`) solo tiene ese caso: le ordena al
+modelo decir que la capacidad no está disponible. Cuando exista el detector,
+habrá que escribir el prompt para cuando sí encuentre anomalías.
 
 ---
 
@@ -236,15 +248,16 @@ Desde la terminal los acentos se corrompen con facilidad, por eso `/docs`.
 
 ## Decisiones abiertas
 
-**Los umbrales de confort no están fijados.** `context.py` anota las lecturas
+**Los umbrales de confort no están fijados.** `llm/formatting.py` anota las lecturas
 con bandas de CO₂ (800 / 1000 / 1500 ppm) y rangos de temperatura y humedad
 que son valores de trabajo, no tomados de una norma. La sección 4.3.4 no los
 fija. Cuando se decidan, su lugar es `common/config.py`, junto a los límites
 físicos, no aquí.
 
-**Los nombres de salón y de piso salen de `config/spaces.json`.** El
-clasificador lee de ahí los números de salón, los alias y a qué piso pertenece
-cada espacio; agregar un alias ahí basta para que se reconozca.
+**Los nombres de salón y de piso salen de `config/spaces.json`**, leído por
+`common/spaces.py`. El clasificador toma de ahí los números de salón, los alias
+y a qué piso pertenece cada espacio; agregar un alias ahí basta para que se
+reconozca (después de reiniciar la API).
 
 **`motion` se reporta como número continuo.** El GRU lo predice bajo MSE
 junto con las demás variables, así que su salida es un valor sin calibrar
