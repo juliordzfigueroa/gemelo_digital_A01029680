@@ -82,6 +82,25 @@ El 3304 tiene sensor, pero su sensor de gas está muerto y sus demás
 variables tienen menos de un día de lecturas, así que se genera completo con
 los parámetros de su tipo.
 
+## En el chat
+
+Una pregunta por un salón sin sensor de un tipo medido ("¿cómo está el
+3201?") se responde con una estimación (`src/api/estimates.py`). El generador
+recorre las últimas 24 horas del salón con su horario y el clima de esas
+horas, hasta el mismo "ahora" que los salones medidos. El último paso es la
+lectura estimada y las 24 horas son el historial. La etiqueta va en tres
+lugares: en el prompt, en una nota que escribe el código después de la
+respuesta de Llama, y en la línea de abajo del visor ("estimado, sin
+sensor"). El error esperado de la nota es el de la validación de abajo.
+
+No hay pronóstico del GRU para esos salones, porque el GRU solo conoce los
+medidos, ni revisión de anomalías, porque en una estimación no hay nada que
+pueda fallar: el chat explica por qué. Los espacios de tipos nunca medidos
+siguen respondiendo "no tiene sensor".
+
+Para probarlo en el visor hay que haber corrido `python -m generator.calibrate`
+y `python -m generator.validate`, y reiniciar la API.
+
 ## Validación
 
 Con la primera semana de datos, dejando cada salón fuera (calibrar el tipo

@@ -593,6 +593,10 @@ clima (Open-Meteo) ──────────────┘                
    parámetros, los de su tipo, o no se genera.
 7. **[src/generator/generate.py](../src/generator/generate.py)** y
    **[validate.py](../src/generator/validate.py).** Generar fechas y validar.
+8. **[src/api/estimates.py](../src/api/estimates.py).** Donde el generador se
+   conecta con el chat: `estimate` corre las últimas 24 horas de un salón sin
+   sensor y devuelve su estimación con el error esperado; `api._target_and_data`
+   la usa cuando un salón no tiene lecturas pero sí es de un tipo medido.
 
 ### Preguntas para comprobar
 

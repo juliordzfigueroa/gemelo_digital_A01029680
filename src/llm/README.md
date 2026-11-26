@@ -61,8 +61,9 @@ recibe la misma respuesta y una demostración se puede repetir.
 | Fuera de tema (pregunta de chatbot general) | "¿cuál es la capital de Francia?", "escríbeme un poema", "explícame qué es el CO₂", "¿qué opinas de…?" | Que no es un asistente general y qué sí puede responder |
 | Pregunta del edificio sin lugar | "¿cómo está el CO₂?", "¿cómo están los valores?" | "¿De qué salón o piso te gustaría saber?". Nunca responde sobre un salón por omisión |
 | Salón que no existe | "3310", "2905" | Que no está registrado y qué salones hay en ese piso; o que los salones de Aulas 3 empiezan con 3 |
-| Salón sin sensor | "3309" | Que no tiene sensor y cuáles sí tienen datos |
-| Alias | "3302" | Que corresponde al 3301 (el 3302 no existe físicamente) |
+| Salón sin sensor, de un tipo medido | "3309", "¿cuál fue el máximo de CO₂ del 3301?" | Una **estimación** del generador (lectura actual o historial del último día), con una nota escrita por el código: que es estimado, de qué salones sale y su error esperado. Pronóstico y anomalías no: se explica por qué |
+| Espacio sin sensor de un tipo nunca medido | "sala de juntas 2" | Que no tiene sensor y cuáles sí tienen datos |
+| Alias | "3302" | Que corresponde al 3301 (el 3302 no existe físicamente), y su estimación |
 
 Si el texto nombra un salón y un piso ("el 3308 del piso 3"), gana el salón.
 El lugar sale siempre del texto: la petición solo lleva la pregunta.
