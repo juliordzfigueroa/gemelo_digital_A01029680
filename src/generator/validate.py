@@ -22,7 +22,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Initial implementation.
+    2026-11-26 - The light left out comes from the same window group.
 
 Reference:
     Section 4.4 of the research document.
@@ -38,7 +38,7 @@ import pandas as pd
 from common import config as cfg
 from common import data as dat
 from common import spaces
-from generator.calibrate import VARIABLES, average, calibrate_room
+from generator.calibrate import VARIABLES, average, calibrate_room, light_group
 from generator.generate import run_room
 from generator.inputs import load_weather, room_grid
 from generator.occupancy import Occupancy
@@ -83,7 +83,8 @@ def validate() -> dict:
     data = dat.load_data()
     occupancy = Occupancy(data)
     weather = load_weather()
-    kinds = {int(s["space_id"]): s["kind"] for s in spaces.read()["spaces"]}
+    registry = {int(s["space_id"]): s for s in spaces.read()["spaces"]}
+    kinds = {space: entry["kind"] for space, entry in registry.items()}
 
     grids, own = {}, {}
     for space in sorted(int(s) for s in data[cfg.SPACE_COLUMN].unique()):
@@ -98,6 +99,12 @@ def validate() -> dict:
         if not others:
             continue
         left_out = {v: average([p[v] for p in others]) for v in VARIABLES}
+        # The light, as in calibrate.py: from the other rooms of its window
+        # group when there are any (the 3206 is the only interior one).
+        same_light = [own[s]["light"] for s in own if s != space and kinds[s] == kinds[space]
+                      and light_group(registry[s]) == light_group(registry[space])]
+        if same_light:
+            left_out["light"] = average(same_light)
         stamps = grid.index
         students = grid["students"].to_numpy()
         results[space] = {}

@@ -8,7 +8,10 @@ Three cases, as the design of the generator sets them:
   - A room without a sensor, of a type that has measured rooms, takes the
     parameters of that type: the average of the measured rooms of the same
     kind in config/spaces.json. Its values are "estimated", and how far off
-    they can be is what generator/validate.py measures.
+    they can be is what generator/validate.py measures. The light is the
+    exception: it comes from the measured rooms of the same window group,
+    "interior" (no windows, like the 3206) or "ventana", because averaging a
+    windowless room with a sunny one gives a room that exists nowhere.
   - A type with no measured room at all (laboratories, meeting rooms) is not
     generated: there is nothing to base it on.
 
@@ -22,7 +25,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Initial implementation.
+    2026-11-26 - Light inherited by window group, not by kind alone.
 
 Reference:
     Section 4.4 of the research document.
@@ -101,6 +104,44 @@ def average(values: list):
     return float(np.mean(values))
 
 
+def light_group(space: dict) -> str | None:
+    """How a space gets its daylight, from the windows the registry records.
+
+    Args:
+        space: Its entry in config/spaces.json.
+
+    Returns:
+        "interior" without windows, "ventana" with any, None if not recorded.
+    """
+    windows = space.get("windows")
+    if windows is None:
+        return None
+    return "interior" if windows == 0 else "ventana"
+
+
+def light_groups(measured: dict, registry: dict) -> dict:
+    """The light parameters of each kind and window group: its measured rooms' average.
+
+    Args:
+        measured: Output of calibrate_room() for every measured room.
+        registry: Space id to its entry in config/spaces.json.
+
+    Returns:
+        A dict from "kind/group" (as "classroom/interior") to
+        {"from_rooms", "params"}.
+    """
+    rooms_by_key: dict[str, list[int]] = {}
+    for space, params in measured.items():
+        group = light_group(registry[space])
+        if "light" in params and group:
+            rooms_by_key.setdefault(f"{registry[space]['kind']}/{group}", []).append(space)
+
+    output = {}
+    for key, rooms in sorted(rooms_by_key.items()):
+        output[key] = {"from_rooms": rooms, "params": average([measured[s]["light"] for s in rooms])}
+    return output
+
+
 def type_params(measured: dict, kinds: dict) -> dict:
     """The parameters of each type: the average of its measured rooms.
 
@@ -141,12 +182,14 @@ def calibrate_all(data: pd.DataFrame | None = None) -> dict:
     data = dat.load_data() if data is None else data
     occupancy = Occupancy(data)
     weather = load_weather()
-    kinds = {int(s["space_id"]): s["kind"] for s in spaces.read()["spaces"]}
+    registry = {int(s["space_id"]): s for s in spaces.read()["spaces"]}
+    kinds = {space: entry["kind"] for space, entry in registry.items()}
 
     measured = {}
     for space in sorted(int(s) for s in data[cfg.SPACE_COLUMN].unique()):
         measured[space] = calibrate_room(room_grid(space, data, occupancy, weather))
     types = type_params(measured, kinds)
+    groups = light_groups(measured, registry)
 
     rooms, not_generated = {}, {}
     for space, kind in sorted(kinds.items()):
@@ -155,14 +198,21 @@ def calibrate_all(data: pd.DataFrame | None = None) -> dict:
             continue
         own = measured.get(space, {})
         params = {v: own.get(v, types[kind]["params"][v]) for v in VARIABLES}
+        light_from = "propia" if "light" in own else "tipo"
+        key = f"{kind}/{light_group(registry[space])}"
+        if "light" not in own and key in groups:
+            params["light"] = groups[key]["params"]
+            light_from = key
         rooms[str(space)] = {
             "kind": kind,
             "origin": "simulado" if own else "estimado",
             "own_variables": [v for v in VARIABLES if v in own],
+            "light_from": light_from,
             "params": params,
         }
     return {
         "types": {k: {"from_rooms": v["from_rooms"]} for k, v in types.items()},
+        "light_groups": {k: {"from_rooms": v["from_rooms"]} for k, v in groups.items()},
         "rooms": rooms,
         "not_generated": not_generated,
     }
@@ -193,10 +243,14 @@ def main() -> int:
     for kind, info in result["types"].items():
         rooms = ", ".join(labels.get(s, str(s)) for s in info["from_rooms"])
         print(f"Tipo {kind}: promedio de {rooms}")
-    print(f"\n{'espacio':>18} {'tipo':>12} {'origen':>9}  variables propias")
+    for key, info in result["light_groups"].items():
+        rooms = ", ".join(labels.get(s, str(s)) for s in info["from_rooms"])
+        print(f"Luz {key}: promedio de {rooms}")
+    print(f"\n{'espacio':>18} {'tipo':>12} {'origen':>9} {'luz de':>20}  variables propias")
     for space, info in result["rooms"].items():
         own = ", ".join(info["own_variables"]) or "ninguna (todo del tipo)"
-        print(f"{labels.get(int(space), space):>18} {info['kind']:>12} {info['origin']:>9}  {own}")
+        print(f"{labels.get(int(space), space):>18} {info['kind']:>12} {info['origin']:>9} "
+              f"{info['light_from']:>20}  {own}")
     print(f"\nNo se generan: {len(result['not_generated'])} espacios "
           f"({', '.join(sorted(set(r.split(chr(39))[1] for r in result['not_generated'].values())))})")
 
