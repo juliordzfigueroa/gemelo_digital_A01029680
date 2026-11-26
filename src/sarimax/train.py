@@ -1,14 +1,15 @@
 """Fit the SARIMAX baseline and evaluate it on the GRU's own test split.
 
-One model per space and variable, so five variables across five spaces means 25
-independent fits. Each one is trained on the training partition only and then
-forecasts 6 steps ahead from the end of every test window, which is exactly the
-task the GRU is scored on: see 12 real steps, produce the next 6 unaided.
+One model per variable and space with test windows: with the first week of
+data, 5 variables in 4 spaces, 20 fits. Each one is trained on the training
+partition only and then forecasts 6 steps ahead from the end of every test
+window, which is exactly the task the GRU is scored on: see 12 real steps,
+produce the next 6 unaided.
 
 The comparison is only worth anything if both models are scored on identical
-targets. The test windows come from the same class the GRU uses
-(common.data.EnvironmentalWindows), built on the frame in physical units, so
-they are the same windows by construction.
+targets. The test windows and their ground truth come from the same class the
+GRU uses (common.data.EnvironmentalWindows), built on the frame in physical
+units, so they are the same windows by construction.
 
 Usage, from the src/ directory:
     python -m sarimax.train
@@ -17,7 +18,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-25 - Took the test windows from the GRU's windows class.
+    2026-11-26 - Ground truth taken from the windows; forecasts placed by row.
 
 Reference:
     Sections 4.2.5 and 4.2.7.1 of the research document.
@@ -62,104 +63,71 @@ def grid_by_space(df: pd.DataFrame) -> dict[int, pd.DataFrame]:
     return output
 
 
-def test_origins(
+def test_windows(
     df: pd.DataFrame, feature_columns: list[str]
-) -> dict[int, list[pd.Timestamp]]:
-    """List the GRU's test windows by space.
+) -> dat.EnvironmentalWindows:
+    """Build the GRU's test windows on the frame in physical units.
 
     Args:
         df: Frame returned by common.data.preprocess(), in physical units.
         feature_columns: Input columns returned by the same call.
 
     Returns:
-        A dict from space id to the origin of each test window (its last
-        observed step), in the order the GRU sees them.
+        The windows. `origins` says where each one ends and `y` holds its
+        ground truth, already in physical units because the frame is.
     """
     spaces = sorted(int(s) for s in df[cfg.SPACE_COLUMN].unique())
     space_index = {space: i for i, space in enumerate(spaces)}
-    windows = dat.EnvironmentalWindows(df, "test", feature_columns, space_index)
-
-    origins: dict[int, list[pd.Timestamp]] = {}
-    for space, origin in windows.origins:
-        origins.setdefault(space, []).append(origin)
-    return origins
-
-
-def real_targets(
-    grids: dict[int, pd.DataFrame], origins: dict[int, list[pd.Timestamp]]
-) -> np.ndarray:
-    """Collect the ground truth for every window, in physical units.
-
-    Args:
-        grids: Output of grid_by_space().
-        origins: Output of test_origins().
-
-    Returns:
-        An array shaped (n_windows, OUTPUT_STEPS, n_variables), ordered by
-        space and then by time.
-    """
-    blocks = []
-    for space in sorted(origins):
-        grid = grids[space]
-        position = {t: i for i, t in enumerate(grid.index)}
-        values = grid[cfg.ACTIVE_VARIABLES].to_numpy(dtype=float)
-        for origin in origins[space]:
-            i = position[origin]
-            blocks.append(values[i + 1 : i + 1 + cfg.OUTPUT_STEPS])
-    return np.stack(blocks)
+    return dat.EnvironmentalWindows(df, "test", feature_columns, space_index)
 
 
 def fit_all(
-    grids: dict[int, pd.DataFrame], origins: dict[int, list[pd.Timestamp]]
+    grids: dict[int, pd.DataFrame], windows: dat.EnvironmentalWindows
 ) -> tuple[np.ndarray, dict]:
     """Fit one model per space and variable and forecast every test window.
 
     Args:
         grids: Output of grid_by_space().
-        origins: Output of test_origins().
+        windows: Output of test_windows().
 
     Returns:
-        A tuple of (predictions shaped like the targets, per-model diagnostics).
+        A tuple of (predictions shaped like windows.y, per-model diagnostics).
     """
-    spaces = sorted(origins)
-    n_windows = sum(len(origins[space]) for space in spaces)
-    prediction = np.empty(
-        (n_windows, cfg.OUTPUT_STEPS, len(cfg.ACTIVE_VARIABLES)), dtype=float
-    )
+    prediction = np.empty(windows.y.shape, dtype=float)
     diagnostics = {}
 
-    for j, variable in enumerate(cfg.ACTIVE_VARIABLES):
-        row = 0
-        for space in spaces:
-            grid = grids[space]
+    for space in sorted({space for space, _ in windows.origins}):
+        grid = grids[space]
+        # Which windows belong to this space, and where each one's last
+        # observed step sits on the grid.
+        rows = [i for i, (s, _) in enumerate(windows.origins) if s == space]
+        origins = grid.index.get_indexer([windows.origins[i][1] for i in rows])
+
+        # Non-training steps become NaN instead of being cut out. Training
+        # days need not be contiguous under the day-based split, and cutting
+        # would both splice distant days together and shift the phase of the
+        # Fourier terms, which are indexed by position. The Kalman filter
+        # skips NaN natively.
+        is_train = (grid["partition"] == "train").to_numpy()
+
+        for j, variable in enumerate(cfg.ACTIVE_VARIABLES):
             series = grid[variable].to_numpy(dtype=float)
-            # Non-training steps become NaN instead of being cut out. Training
-            # days need not be contiguous under the day-based split, and
-            # cutting would both splice distant days together and shift the
-            # phase of the Fourier terms, which are indexed by position. The
-            # Kalman filter skips NaN natively.
-            is_train = (grid["partition"] == "train").to_numpy()
             training = np.where(is_train, series, np.nan)
 
             t0 = time.time()
             baseline = mod.BaselineSARIMAX().fit(training)
-
-            position = {t: i for i, t in enumerate(grid.index)}
-            indices = np.array([position[t] for t in origins[space]])
-            output = baseline.forecast_from(series, indices, cfg.OUTPUT_STEPS)
-            prediction[row : row + len(indices), :, j] = output
-            row += len(indices)
+            output = baseline.forecast_from(series, origins, cfg.OUTPUT_STEPS)
+            prediction[rows, :, j] = output
 
             key = f"{variable}@space{space}"
+            aic = float(baseline.result.aic)
+            seconds = round(time.time() - t0, 2)
             diagnostics[key] = {
-                "aic": baseline.aic,
+                "aic": aic,
                 "n_train": int(is_train.sum()),
-                "seconds": round(time.time() - t0, 2),
+                "seconds": seconds,
             }
-            print(
-                f"    {key:28} AIC {baseline.aic:10.1f}  "
-                f"{diagnostics[key]['seconds']:6.2f} s"
-            )
+            print(f"    {key:28} AIC {aic:10.1f}  {seconds:6.2f} s")
     return prediction, diagnostics
 
 
@@ -175,19 +143,21 @@ def run(raw_df: pd.DataFrame) -> dict:
     """
     df, feature_columns = dat.preprocess(raw_df)
     grids = grid_by_space(df)
-    origins = test_origins(df, feature_columns)
-    target = real_targets(grids, origins)
+    windows = test_windows(df, feature_columns)
+    target = windows.y.numpy().astype(float)
 
+    n_spaces = len({space for space, _ in windows.origins})
+    n_variables = len(cfg.ACTIVE_VARIABLES)
     print(f"\nOrden {mod.ORDER} + Fourier K={mod.HARMONICS}")
     print(
-        f"Modelos a ajustar: {len(cfg.ACTIVE_VARIABLES)} variables x "
-        f"{len(origins)} espacios = {len(cfg.ACTIVE_VARIABLES) * len(origins)}"
+        f"Modelos a ajustar: {n_variables} variables x {n_spaces} espacios "
+        f"= {n_variables * n_spaces}"
     )
     print(f"Ventanas de prueba: {len(target):,} (las mismas del GRU)")
 
     print("\n  Ajustando:")
     t0 = time.time()
-    prediction, diagnostics = fit_all(grids, origins)
+    prediction, diagnostics = fit_all(grids, windows)
     return {
         "target": target,
         "prediction": prediction,
