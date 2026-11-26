@@ -21,7 +21,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-01 - Initial implementation.
+    2026-11-26 - GRU trained with the same epochs and patience as gru.train.
 
 Reference:
     Section 4.2.5 of the research document.
@@ -139,8 +139,8 @@ def main() -> int:
     parser.add_argument(
         "--data", default=None, help="contract frame; defaults to the cleaned sensor data"
     )
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--patience", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=cfg.MAX_EPOCHS)
+    parser.add_argument("--patience", type=int, default=cfg.PATIENCE)
     args = parser.parse_args()
 
     df = dat.load_data(args.data)

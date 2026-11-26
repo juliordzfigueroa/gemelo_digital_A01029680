@@ -8,7 +8,7 @@ estadístico contra el cual comparar el GRU.
 | Archivo | Qué hace |
 |---|---|
 | `model.py` | Un modelo SARIMAX para una variable de un salón, con el ciclo diario como términos de Fourier. |
-| `train.py` | Ajusta los 25 modelos y los evalúa sobre las mismas ventanas de prueba que el GRU. |
+| `train.py` | Ajusta un modelo por variable y salón (hoy 20) y los evalúa sobre las mismas ventanas de prueba que el GRU. |
 
 ## Qué es y qué no es
 
@@ -20,7 +20,7 @@ dos modelos se entrenan por separado y con criterios distintos:
 | Criterio | Minimiza MSE | Maximiza verosimilitud |
 | Método | Backpropagation, paso a paso | Filtro de Kalman, de una sola vez |
 | Alcance | Un modelo global multivariado | Un modelo por variable y espacio |
-| Para 5 variables y 5 espacios | 1 modelo | **25 modelos** |
+| Con la primera semana de datos | 1 modelo | **20 modelos** (5 variables × 4 salones) |
 
 **No hay una función de pérdida que viaje de uno al otro.** SARIMAX no tiene
 pesos que se actualicen por gradiente, así que no hay nada que pasar. Y aunque
@@ -31,8 +31,13 @@ baseline.
 Lo que sí comparten, y es lo que hace comparables los números: los mismos
 datos, las mismas particiones, las mismas ventanas de prueba y el mismo código
 de métricas. Las ventanas no se reconstruyen aquí: `train.py` usa la misma
-clase del GRU (`common.data.EnvironmentalWindows`), así que son las mismas por
-construcción.
+clase del GRU (`common.data.EnvironmentalWindows`), y de ella toma también la
+respuesta correcta de cada ventana, así que son las mismas por construcción.
+
+**Por qué 4 salones y no 6.** El GRU se entrena con los 6 salones que tienen
+datos, pero SARIMAX solo se ajusta donde hay algo que calificar. El día de
+prueba es el viernes 9 de octubre, y en él no hay lecturas del 304 (su sensor
+dejó de reportar el día 7) ni del 402 (solo tiene 2 lecturas, del día 2).
 
 ## Estacionalidad: por qué no `s=288`
 
@@ -49,8 +54,9 @@ Medido sobre una semana de datos, un solo modelo:
 | `s=288` estacional | **2,147 s** | 289 |
 | ARIMAX + Fourier K=4 | **0.82 s** | 3 |
 
-Medido sobre los datos del proyecto, no estimado: son **2,600x**. Y hacen
-falta 25 modelos, lo que da unas 15 horas contra 26 segundos. Después de esa
+Medido sobre los datos del proyecto, no estimado: son **2,600x**. Con los 20
+modelos de hoy serían unas 12 horas solo de ajuste; con Fourier, la corrida
+completa (ajuste y pronóstico) tarda alrededor de un minuto. Después de esa
 medición el modo `s=288` se quitó del código; estos números son su registro.
 
 **La alternativa usa una parte de la misma ecuación que ya está ahí.** En vez de
@@ -64,7 +70,7 @@ lugar de 289 dimensiones de estado.
 Desde `src/`:
 
 ```bash
-python -m sarimax.train                 # los 25 modelos, ~1 min
+python -m sarimax.train                 # un modelo por variable y salón, ~1 min
 python compare_models.py                # GRU contra SARIMAX
 ```
 
