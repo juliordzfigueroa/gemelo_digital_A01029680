@@ -18,6 +18,7 @@ Julio César Rodríguez Figueroa — A01029680
 | **Visor** | Potree en el navegador: un escaneo por piso, marcadores por salón y chat | listo; faltan los marcadores de los salones y corregir la altura entre pisos |
 | **Servidor de escaneos** | Sirve las nubes convertidas, aparte de la API | listo |
 | **Detector de anomalías** | Regla 3σ sobre la última lectura; el chat la usa en las preguntas de anomalía | listo; no detecta sensores atascados (medido) |
+| **Generador** | Modelos de caja gris por variable: estima los salones sin sensor y simula el semestre | listo para salones; validado dejando uno fuera |
 
 El GRU es de dos capas [128, 64], con un ID de espacio como rasgo para que un
 solo modelo sirva a todo el edificio. Su celda recurrente está escrita a mano
@@ -670,6 +671,9 @@ Vale para las consolas que se abran después, no para la actual.
 python -m llm.classifier                               # cómo se rutean las preguntas
 python -m llm.context                                  # los prompts por tipo
 python -m anomaly.evaluate                             # precisión y recall del detector 3σ
+python -m generator.calibrate                          # parámetros del generador para cada espacio
+python -m generator.generate --since 2026-11-02 --until 2026-11-08   # generar una semana
+python -m generator.validate                           # validación dejando un salón fuera
 ```
 
 | Opción | Para qué |
@@ -731,6 +735,7 @@ src/common/        contrato de datos, ventanas, normalización, métricas, regis
 src/gru/          modelo, entrenamiento y predicción
 src/sarimax/      baseline estadístico
 src/anomaly/      detector de anomalías 3σ y su evaluación
+src/generator/    generador de datos ambientales: una ecuación por archivo
 src/llm/          clasificador y vocabulario, prompts, frases fijas, cliente de Ollama
 src/api/          orquestador FastAPI y recuperación de datos; también sirve el visor
 src/scans/        alineación y conversión de escaneos, servidor de nubes
@@ -750,6 +755,7 @@ check_gpu.py      diagnóstico de CUDA
 | [src/llm/README.md](src/llm/README.md) | La capa conversacional: qué se le puede preguntar, y el reparto de trabajo con el LLM |
 | [src/sarimax/README.md](src/sarimax/README.md) | El baseline, y por qué no `s=288` |
 | [src/anomaly/README.md](src/anomaly/README.md) | El detector 3σ: qué detecta y qué no, medido con anomalías inyectadas |
+| [src/generator/README.md](src/generator/README.md) | El generador: cómo se calibra cada ecuación y qué tanto acierta en un salón sin sensor |
 | [docs/mapa_codigo.md](docs/mapa_codigo.md) | Guía para leer el código por partes: ideas, orden de lectura y preguntas para comprobar |
 | [docs/estandar_codigo.md](docs/estandar_codigo.md) | Convención de documentación del código |
 | [docs/estandar_commits.md](docs/estandar_commits.md) | Convención de mensajes de commit |

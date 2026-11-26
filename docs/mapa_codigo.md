@@ -11,6 +11,7 @@ unas preguntas para comprobar que se entendió. Los números de línea son del
 | Capa conversacional | `src/llm/`, `src/api/`, `src/common/spaces.py` | **completa** |
 | Modelo predictivo y su preparación de datos | `src/gru/`, `src/sarimax/`, `src/common/` | **completa** |
 | Ingesta (limpieza, horario, clima) | `src/ingestion/` | **completa** |
+| Generador de datos ambientales | `src/generator/` | **completa** |
 
 ---
 
@@ -527,3 +528,85 @@ Porque las palabras de edificio se buscan como palabras completas, con
 `_contains_word`. 3) `llm/vocabulary.py`: se agrega a
 `VARIABLE_SYNONYMS["temperature"]`. 4) El código: `formatting.trend`. 5)
 `space_rows`, en `api/retrieval.py`.
+
+---
+
+## Generador de datos ambientales
+
+### Las ideas
+
+**Caja gris.** Cada variable tiene una ecuación con estructura física (sección
+4.4.2) y parámetros que salen de las lecturas de los salones con sensor. La
+ecuación dice *por qué* cambia la variable; los datos dicen *cuánto*.
+
+**Un archivo por ecuación.** `co2.py` es el balance de masa, `humidity.py` el
+mismo en humedad absoluta, `temperature.py` el modelo empírico, `light.py` el
+de estados y `motion.py` el del sensor de movimiento. Todos tienen las mismas
+tres partes: `calibrate` (sacar los parámetros de un salón), `step` (avanzar
+5 minutos) y `main` (compararse contra lo medido).
+
+**N(t) compartida.** Las cinco ecuaciones leen la misma ocupación. Cuando
+empieza una clase, todas reaccionan al mismo tiempo, como en los datos reales.
+
+**ε.** Lo que la ecuación no explica, como un proceso lento con media propia
+(un AR(1)). En el CO₂ es sobre todo la deriva del sensor MOX.
+
+**El agente.** `RoomGenerator` guarda el estado de un salón (el CO₂, la humedad,
+si las lámparas están encendidas, el ε de cada variable) y lo avanza con
+`step()`, igual que un agente de Mesa.
+
+### Cómo viaja todo
+
+```
+horario ─► occupancy.py ─► N(t) ─┐
+datos limpios ───────────────────┼─► inputs.room_grid ─► co2 / humidity / temperature / light / motion .calibrate
+clima (Open-Meteo) ──────────────┘                                │
+                                                                  ▼
+                                       calibrate.py ─► models/generator_params.json
+                                       (propios, o el promedio de su tipo)
+                                                                  │
+                         generate.py ─► RoomGenerator.step() × cada 5 min ─► datos con origen "simulado"/"estimado"
+                         validate.py ─► dejando un salón fuera, contra lo medido
+```
+
+### Orden de lectura
+
+1. **[src/generator/occupancy.py](../src/generator/occupancy.py).**
+   `Occupancy.students` (línea 78) da los alumnos de un salón a cada hora;
+   `empty_days` (línea 109) encuentra los bloques que los sensores vieron
+   vacíos.
+2. **[src/generator/co2.py](../src/generator/co2.py).** `decay_fits` (línea
+   108) busca las caídas y `_fit_decay` (línea 142) les ajusta la
+   exponencial; `calibrate` (línea 71) saca λ, C_ext y g; `step` (línea 167)
+   es la ecuación de un paso.
+3. **[src/generator/noise.py](../src/generator/noise.py).** `fit` (línea 36)
+   y `step` (línea 69): el AR(1) de ε.
+4. **[src/generator/humidity.py](../src/generator/humidity.py),
+   [temperature.py](../src/generator/temperature.py),
+   [light.py](../src/generator/light.py) y
+   [motion.py](../src/generator/motion.py).** La misma forma que `co2.py`. En
+   `light.py`, `next_state` (línea 175) es la cadena de Markov de las lámparas.
+5. **[src/generator/room.py](../src/generator/room.py).** `RoomGenerator.step`
+   (línea 60): las cinco ecuaciones juntas.
+6. **[src/generator/calibrate.py](../src/generator/calibrate.py).**
+   `calibrate_all` (línea 132) decide, espacio por espacio, si usa sus
+   parámetros, los de su tipo, o no se genera.
+7. **[src/generator/generate.py](../src/generator/generate.py)** y
+   **[validate.py](../src/generator/validate.py).** Generar fechas y validar.
+
+### Preguntas para comprobar
+
+1. ¿Por qué la humedad no tiene su propia λ?
+2. Si mañana le pones sensor al 3201, ¿qué tienes que correr para que el
+   generador lo use con sus propios parámetros?
+3. ¿Por qué el generador no genera las salas de juntas?
+4. ¿De dónde sale que el 3206 casi no tiene luz natural?
+5. ¿Se puede evaluar el GRU con datos del generador?
+
+Respuestas: 1) Porque es el mismo aire el que saca el CO₂ y el vapor: un
+salón tiene un solo caudal. 2) Agregar el sensor a `config/sensors.csv`,
+volver a limpiar los datos y correr `python -m generator.calibrate`. 3)
+Porque ninguna tiene sensor: no hay nada de qué sacar sus parámetros. 4) De
+`daylight_factor` en `light.py`: la mediana de luz/radiación de sus fines de
+semana da k = 3. 5) No: mediría qué tan bien imita las ecuaciones, no el
+edificio.
