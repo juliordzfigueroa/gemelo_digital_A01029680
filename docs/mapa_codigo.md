@@ -3,14 +3,14 @@
 Guía para leer el repositorio por partes. Cada sección explica primero las
 ideas que hacen falta, luego el orden de lectura de los archivos y al final
 unas preguntas para comprobar que se entendió. Los números de línea son del
-25 de noviembre de 2026; si el código cambia, se pueden mover un poco.
+26 de noviembre de 2026; si el código cambia, se pueden mover un poco.
 
 | Parte | Carpetas | Estado de esta guía |
 |---|---|---|
 | Escaneos y visor (Potree) | `src/scans/`, `web/`, partes de `src/api/` | **completa** |
 | Capa conversacional | `src/llm/`, `src/api/` | pendiente |
 | Modelo predictivo y su preparación de datos | `src/gru/`, `src/sarimax/`, `src/common/` | **completa** |
-| Ingesta (limpieza, horario, clima) | `src/ingestion/` | pendiente |
+| Ingesta (limpieza, horario, clima) | `src/ingestion/` | **completa** |
 
 ---
 
@@ -74,7 +74,7 @@ Navegador ── index.html + viewer.js ◄── API :8000 (sirve la página y 
    Qué buscar: para cada piso, `cloud` (dónde está su octree) y `transform`
    (cuánto se gira y mueve). Es la única "base de datos" de los pisos.
 
-2. **[src/common/config.py](../src/common/config.py), líneas 39 a 63.**
+2. **[src/common/config.py](../src/common/config.py), líneas 39 a 66.**
    Qué buscar: las rutas y direcciones (`SCANS_DIR`, `SCANS_URL`,
    `VIEWER_ORIGINS`). Todas se leen de variables de entorno con un valor por
    omisión; así el mismo código corre en otra máquina sin tocarlo.
@@ -276,3 +276,123 @@ lo que son. 2) Un hueco de más de 15 minutos sin lecturas corta el tramo
 misma clase `EnvironmentalWindows`: de `origins` saca dónde pronosticar y de
 `y` la respuesta correcta. 5) Cuatro: cada pasada
 da 30 minutos.
+
+---
+
+## Ingesta (limpieza, horario y clima)
+
+### Las ideas
+
+**Exportación cruda.** Cada nodo ESP32 manda una lectura cada ~5 segundos, y
+la plataforma las exporta en CSV: 370,341 filas del 1 al 11 de octubre. Las
+columnas que importan son `deviceId`, `formattedTimestamp`, `temperature`,
+`humidity`, `lightPercent`, `motion` y `eco2`.
+
+**Contrato de datos.** Lo que esperan todos los modelos: una fila por salón y
+por intervalo de 5 minutos, con `timestamp`, `space_id` y las 5 variables. Está
+definido en `config.py`. La limpieza es la única parte que conoce el formato
+crudo; si mañana los datos llegan de la base del Tec, solo cambia esta parte.
+
+**De sensor a salón.** El modelo aprende salones, no sensores.
+`config/sensors.csv` dice qué sensor estuvo en qué salón y desde cuándo. Si
+mueves un sensor, se agrega una fila con fechas y las lecturas se reparten
+solas.
+
+**Invalidar, no borrar.** Una lectura imposible se vuelve `NaN` solo en la
+variable afectada; las demás variables de esa lectura se quedan. Hay tres
+reglas: el `-1` del sensor de gas, temperatura y humedad en 0 al mismo tiempo, y
+valores fuera del rango del instrumento. Todo queda contado en el reporte.
+
+**eCO₂ no es CO₂.** El sensor de gas es MOX: estima el CO₂ a partir de
+compuestos volátiles. Sube con productos de limpieza y marcadores, y algunos
+fines de semana se queda arriba de 1,000 ppm sin nadie en el salón.
+
+**Horario sin día de la semana.** `schedule.csv` trae fechas, horas y salón,
+pero no qué día de la semana se da la clase. Por eso `schedule.py` calcula una
+ocupación *posible* (cualquier día entre semana dentro del rango de fechas) y
+la compara contra lo que vieron los sensores.
+
+**Clima.** Viene de Open-Meteo, gratis y sin clave. El archivo histórico se
+publica con unos días de retraso; lo que falte se llena con el servicio de
+pronóstico, y cada hora dice de cuál vino. Además de la humedad relativa se
+calcula la absoluta (g/m³), porque la relativa depende de la temperatura.
+
+### Cómo viaja todo
+
+```
+CSV de los sensores ─► cleaning.py ─► data/processed/aulas3.parquet  (el contrato: lo leen GRU, SARIMAX y la API)
+                          │            data/processed/aulas3_report.json  (qué se descartó y por qué)
+                  config/sensors.csv
+
+schedule.csv ─► schedule.py ─► tabla en la terminal (¿el horario explica lo que ven los sensores?)
+                   │
+           config/spaces.json  (salón "3308" → space_id 308)
+
+Open-Meteo ─► weather.py ─► data/processed/weather.parquet  (clima cada 5 minutos)
+```
+
+### Orden de lectura
+
+1. **[config/sensors.csv](../config/sensors.csv).** Ocho filas. Qué buscar:
+   `device` → `space_id`, y las notas: el 304 con el sensor de gas muerto, el
+   402 con 2 horas de datos y el sensor 8 sin lugar.
+
+2. **[src/ingestion/cleaning.py](../src/ingestion/cleaning.py).** Empieza por
+   `clean` (línea 271): es la lista de pasos y da el panorama.
+   - Las constantes (líneas 51 a 68): `COLUMNS` (qué columna cruda se vuelve
+     cuál), `TIME_FORMAT`, `SENTINEL = -1` y `MIN_READINGS_PER_INTERVAL = 6`.
+   - `read_raw` (línea 71): lee uno o varios CSV, convierte la hora y quita
+     las lecturas repetidas entre exportaciones. Si una hora no tiene el
+     formato esperado, se detiene en lugar de tirarla en silencio.
+   - `assign_spaces` (línea 125): el bucle recorre `sensors.csv` y le pone a
+     cada lectura su salón; las de sensores sin salón se descartan y se
+     cuentan.
+   - `invalidate` (línea 170): las tres reglas, en orden. `mark` (línea 191)
+     cuenta por sensor antes de borrar.
+   - `aggregate` (línea 215): agrupa por salón e intervalo de 5 minutos y
+     promedia. Un intervalo con menos de 6 lecturas válidas queda vacío en esa
+     variable. El movimiento promediado da la fracción del intervalo con
+     detección.
+   - `space_summary` (línea 245): el resumen por salón que imprime la
+     terminal.
+
+3. **[src/ingestion/schedule.py](../src/ingestion/schedule.py).**
+   - `load_schedule` (línea 93): lee el CSV y junta las filas idénticas.
+     Convierte las fechas y las horas con `_minutes` (línea 62: `1310` → 790
+     minutos), y traduce el salón a `space_id` con `load_spaces` (línea 75).
+   - `possible_occupancy` (línea 139): para cada intervalo, cuántos alumnos
+     podría haber. Solo cuenta de lunes a viernes, dentro de las fechas y
+     horas del bloque; si dos bloques se enciman, se queda el mayor.
+   - `compare` (línea 175): por salón y día, el movimiento y el eCO₂ dentro y
+     fuera de clase entre las 7 y las 22 h, y su correlación con los alumnos
+     posibles.
+
+4. **[src/ingestion/weather.py](../src/ingestion/weather.py).**
+   - `absolute_humidity` (línea 63): la fórmula de Magnus de la WMO.
+   - `_query` (línea 82) y `download` (línea 118): piden al archivo histórico
+     y llenan con el pronóstico lo que falte.
+   - `to_intervals` (línea 148): de horas a intervalos de 5 minutos, por
+     interpolación lineal.
+   - `attach` (línea 175) y `summary` (línea 190): pegan el clima a cada fila
+     de los sensores y comparan interior contra exterior.
+
+### Preguntas para comprobar
+
+1. Si mañana mueves el sensor del 3308 al 3309, ¿qué archivo cambias y qué
+   pasa con las lecturas anteriores?
+2. Una lectura trae `eco2 = -1` pero la temperatura bien. ¿Se pierde la
+   temperatura?
+3. ¿Por qué un intervalo con solo 3 lecturas válidas de CO₂ queda vacío en
+   CO₂?
+4. ¿Por qué `schedule.py` habla de ocupación "posible" y no "programada"?
+5. ¿Por qué `weather.py` calcula la humedad absoluta?
+
+Respuestas: 1) `config/sensors.csv`: a la fila de `esp32_room_03` le pones
+`until` con la fecha del cambio, y agregas otra fila para el mismo sensor con
+`space_id` 309 y `since` en esa fecha. Las lecturas anteriores siguen siendo
+del 308. 2) No: `invalidate` solo vacía la variable afectada. 3) Por
+`MIN_READINGS_PER_INTERVAL = 6`: el promedio de tan pocas lecturas es ruido.
+4) Porque el horario no trae el día de la semana: un bloque cuenta en todos los
+días entre semana de su rango. 5) Porque la relativa depende de la
+temperatura: el mismo aire marca ~95% afuera y ~46% adentro, ya calentado; el
+balance de humedad se escribe en g/m³.

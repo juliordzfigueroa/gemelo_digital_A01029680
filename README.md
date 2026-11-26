@@ -407,8 +407,9 @@ modelo **corre**; qué tan bien acierta lo dice el paso 3.
 python compare_models.py
 ```
 
-Entrena el GRU y ajusta SARIMAX sobre las mismas ventanas de prueba, y aborta
-si no coinciden. Con una semana de datos SARIMAX gana; ver la advertencia al
+Entrena el GRU y ajusta SARIMAX sobre las mismas ventanas de prueba: SARIMAX
+las toma de la misma clase que el GRU, así que coinciden por construcción. Con
+una semana de datos SARIMAX gana; ver la advertencia al
 final.
 
 ### 6. El horario contra los sensores
