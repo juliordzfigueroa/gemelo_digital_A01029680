@@ -17,8 +17,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Word lists moved to vocabulary.py; removed the list of
-    present-state words, which could not change the result.
+    2026-11-26 - Reads the date and time a question asks about.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -29,6 +28,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
+from datetime import date, time
 
 from common import config as cfg
 from common import spaces
@@ -54,6 +54,15 @@ ROOM_NUMBER = re.compile(r"\b(\d{4})\b")
 # Horizon when a forecast question names none: one direct pass of the GRU.
 DEFAULT_HORIZON = 30
 
+# A date without a year is in the semester's year.
+YEAR = int(cfg.SEMESTER_START[:4])
+
+# "3 de noviembre", "10 de nov".
+DAY_OF_MONTH = re.compile(rf"\b(\d{{1,2}})\s+de\s+({'|'.join(voc.MONTHS)})\b")
+
+# "a las 10", "a las 10:30", "a la 1". The minutes are optional.
+CLOCK_TIME = re.compile(r"\ba\s+las?\s+(\d{1,2})(?::(\d{2}))?\b")
+
 
 @dataclass
 class Intent:
@@ -74,6 +83,9 @@ class Intent:
             "out_of_scope" (something a general chatbot would answer, or
             nothing recognizable at all). None for building questions.
         horizon_min: Minutes ahead, meaningful only when kind is "forecast".
+        on_day: The date the question asks about ("el 3 de noviembre"), or
+            None for the present.
+        at_time: The time of day it asks about ("a las 10"), or None.
         original_text: The question as the user typed it, so the prompt can
             quote it back verbatim.
     """
@@ -86,6 +98,8 @@ class Intent:
     unknown_room: str | None = None
     chat: str | None = None
     horizon_min: int = DEFAULT_HORIZON
+    on_day: date | None = None
+    at_time: time | None = None
     original_text: str = ""
 
 
@@ -133,6 +147,8 @@ def classify(question: str) -> Intent:
         unknown_room=unknown_room,
         chat=chat,
         horizon_min=horizon,
+        on_day=_extract_day(text),
+        at_time=_extract_time(text),
         original_text=question,
     )
 
@@ -287,6 +303,51 @@ def _extract_floor(text: str) -> int | None:
     elif ordinal:
         floor = voc.FLOOR_ORDINALS[ordinal.group(1)]
     return floor if floor in FLOOR_SPACES else None
+
+
+def _extract_day(text: str) -> date | None:
+    """Find the date the question asks about.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        The date, in the semester's year, or None when it names no day or
+        the day does not exist ("31 de noviembre").
+    """
+    found = DAY_OF_MONTH.search(text)
+    if not found:
+        return None
+    try:
+        return date(YEAR, voc.MONTHS[found.group(2)], int(found.group(1)))
+    except ValueError:
+        return None
+
+
+def _extract_time(text: str) -> time | None:
+    """Find the time of day the question asks about.
+
+    The hour is taken as written; "de la tarde" or "pm" after it moves it to
+    the afternoon. "A las 3" stays at 3:00, and the answer shows the time it
+    used, so a misreading is visible.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        The time, or None when it names no hour or the hour does not exist.
+    """
+    found = CLOCK_TIME.search(text)
+    if not found:
+        return None
+    hour = int(found.group(1))
+    minute = int(found.group(2) or 0)
+    after = text[found.end() : found.end() + 15]
+    if hour < 12 and any(after.lstrip().startswith(w) for w in voc.AFTERNOON_WORDS):
+        hour += 12
+    if hour > 23 or minute > 59:
+        return None
+    return time(hour, minute)
 
 
 def _extract_unknown_room(text: str) -> str | None:

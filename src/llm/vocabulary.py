@@ -65,6 +65,20 @@ HORIZON_PHRASES = [
 ]
 
 # --------------------------------------------------------------------------
+# When: a date and a time of day
+# --------------------------------------------------------------------------
+MONTHS = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+    "julio": 7, "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10,
+    "noviembre": 11, "diciembre": 12,
+    "ene": 1, "feb": 2, "abr": 4, "jun": 6, "jul": 7, "ago": 8, "sep": 9,
+    "sept": 9, "oct": 10, "nov": 11, "dic": 12,
+}
+
+# Words after the hour that move it to the afternoon: "a las 5 de la tarde".
+AFTERNOON_WORDS = ["pm", "p.m.", "de la tarde", "de la noche"]
+
+# --------------------------------------------------------------------------
 # Which variables
 # --------------------------------------------------------------------------
 VARIABLE_SYNONYMS = {

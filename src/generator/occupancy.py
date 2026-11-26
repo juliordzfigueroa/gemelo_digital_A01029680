@@ -44,8 +44,8 @@ from common import data as dat
 from ingestion import schedule as sch
 
 # The semester the generator covers: Semana Tec 1 to the end of period 3.
-FIRST_DAY = pd.Timestamp("2026-09-14")
-LAST_DAY = pd.Timestamp("2026-12-06")
+FIRST_DAY = pd.Timestamp(cfg.SEMESTER_START)
+LAST_DAY = pd.Timestamp(cfg.SEMESTER_END)
 
 # A block "happened" on a day when, over its readings, the mean motion
 # fraction or the mean light reached these. Lamps on read 40 to 65 % in the

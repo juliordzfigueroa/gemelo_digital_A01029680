@@ -116,6 +116,12 @@ PHYSICAL_LIMITS = {
 # Reference: docs/hallazgos_robod.md
 BINARY = {"motion"}
 
+# --- Semester --------------------------------------------------------------
+# What the generator covers and the dates a question can ask about: Semana
+# Tec 1 to the end of period 3. The first period is ignored.
+SEMESTER_START = "2026-09-14"
+SEMESTER_END = "2026-12-06"
+
 # --- Time windows ----------------------------------------------------------
 INTERVAL_SECONDS = 300  # data aggregated to 5-minute buckets
 INPUT_STEPS = 12  # 1 hour of context
