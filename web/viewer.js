@@ -223,6 +223,7 @@ $id("ask").addEventListener("submit", async (event) => {
 		if (about !== null && about !== undefined) {
 			const kind = INTENT_LABELS[answer.intent_type] ?? answer.intent_type;
 			appendSpan(pending, "meta", `${kind} • ${about}`
+				+ (answer.origin === "estimado" ? " • estimado, sin sensor" : "")
 				+ (answer.forecast_method ? ` • ${answer.forecast_method}, ${answer.horizon_min} min` : ""));
 		}
 		if (answer.warning) appendSpan(pending, "warning", answer.warning);

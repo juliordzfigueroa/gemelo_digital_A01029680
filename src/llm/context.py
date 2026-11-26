@@ -67,6 +67,8 @@ def build_prompt(intent: Intent, data: dict) -> tuple[str, str]:
     """
     if data.get("scope") in ("floor", "building"):
         user = floor_prompt.prompt(intent, data)
+    elif data.get("origin") == "estimado":
+        user = _prompt_estimate(intent, data)
     elif intent.kind == "forecast":
         user = _prompt_forecast(intent, data)
     elif intent.kind == "history":
@@ -243,6 +245,57 @@ def _prompt_anomaly(intent: Intent, data: dict) -> str:
         "Responde en español usando solo estos datos. Si hay anomalías, dilas "
         "primero con su valor y aclara que pueden venir del ambiente o de una "
         "falla del sensor. Si no las hay, dilo sin exagerar.",
+    ]
+    return "\n".join(parts)
+
+
+def _prompt_estimate(intent: Intent, data: dict) -> str:
+    """Describe the estimate of a space without a sensor.
+
+    The prompt says three times, in three ways, that these are not readings:
+    the heading, the line naming the rooms it comes from, and the expected
+    error. The API also appends a note written by the code, so the label is
+    there even if the model drops it.
+
+    Args:
+        intent: The classified question: "current" or "history".
+        data: Built by api.estimates.estimate().
+
+    Returns:
+        The user prompt.
+    """
+    space = data.get("space", "desconocido")
+    rooms = ", ".join(data.get("based_on", []))
+    parts = [
+        f"El usuario preguntó: «{intent.original_text}»",
+        "",
+        f"EL ESPACIO {space} NO TIENE SENSOR. Estos valores son ESTIMADOS por el "
+        f"generador físico, calibrado con los salones {rooms}; no son mediciones.",
+    ]
+    if "summary" in data:
+        summary = data["summary"]
+        variable = data.get("variable", "co2")
+        unit = fmt.UNIT_LABELS.get(variable, "")
+        parts += [
+            f"HISTORIAL ESTIMADO de {variable}, {data.get('since', '?')} a {data.get('until', '?')}:",
+            f"  Máximo:   {fmt.number(summary.get('max'))} {unit}".rstrip(),
+            f"  Mínimo:   {fmt.number(summary.get('min'))} {unit}".rstrip(),
+            f"  Promedio: {fmt.number(summary.get('mean'))} {unit}".rstrip(),
+        ]
+    else:
+        readings = data.get("readings", {})
+        if intent.variables:
+            readings = {v: x for v, x in readings.items() if v in intent.variables}
+        parts += [f"ESTIMACIÓN para las {data.get('timestamp', '?')}:", fmt.readings(readings)]
+        notes = fmt.threshold_notes(readings)
+        if notes:
+            parts += ["", "REFERENCIA DE RANGOS:", notes]
+    parts += [
+        "",
+        f"ERROR TÍPICO DE LA ESTIMACIÓN: {fmt.expected_error(data.get('expected_error'))}.",
+        "",
+        "Responde en español usando solo estos datos. Di en la primera oración "
+        "que son valores estimados, no medidos.",
     ]
     return "\n".join(parts)
 

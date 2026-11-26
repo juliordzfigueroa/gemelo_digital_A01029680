@@ -19,8 +19,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - The unknown-room and no-sensor sentences moved here from
-    the API.
+    2026-11-26 - Sentences for estimated rooms, from the generator.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -85,6 +84,20 @@ TEMPLATES: dict[str, tuple[str, ...]] = {
         "El {asked} es el mismo salón que el {label}, y ese todavía no tiene "
         "sensor. Por ahora hay datos de {rooms}.",
     ),
+    "estimate_note": (
+        "{alias}Valores estimados: {subject} no tiene sensor. Salen del generador "
+        "físico, calibrado con {rooms}. Error esperado: {error}.",
+    ),
+    "estimate_no_forecast": (
+        "{subject} no tiene sensor, y el pronóstico del GRU solo existe para los "
+        "salones medidos. Lo que sí te puedo dar es una estimación de cómo está "
+        "ahora o de cómo estuvo en el último día.",
+    ),
+    "estimate_no_anomaly": (
+        "{subject} no tiene sensor, y las anomalías solo se buscan en lecturas "
+        "reales: en una estimación no hay nada que pueda fallar. Si quieres, te "
+        "doy una estimación de cómo está ahora.",
+    ),
 }
 
 
@@ -121,6 +134,54 @@ def spoken_list(items: list[str]) -> str:
 
 # Labels that take "la": "la oficina mentores", "la sala de juntas 1".
 FEMININE_LABELS = ("oficina", "sala")
+
+
+def asked_alias(label: str, aliases: list[str], question: str) -> str | None:
+    """The other number the question used for a space, if it used one.
+
+    Args:
+        label: How the space is called ("3301").
+        aliases: Other numbers it is known by, from the registry.
+        question: The question as typed.
+
+    Returns:
+        The alias found in the question ("3302"), or None.
+    """
+    for alias in aliases:
+        if alias != label and alias.isdigit() and alias in question.lower():
+            return alias
+    return None
+
+
+def capitalized(label: str) -> str:
+    """The label with its article, starting with a capital: "El 3201"."""
+    named = with_article(label)
+    return named[:1].upper() + named[1:]
+
+
+def estimate_note(label: str, aliases: list[str], rooms: list[str], error: str, question: str) -> str:
+    """The note the code adds after an estimated answer.
+
+    It says the values are estimated, what they come from and how far off
+    they can be. The model is asked to say so too, but this note is written
+    by the code, so it is there even when the model forgets.
+
+    Args:
+        label: How the space is called.
+        aliases: Other numbers it is known by.
+        rooms: Labels of the measured rooms its type was calibrated with.
+        error: The expected error, already written ("CO₂ ±190 ppm, ...").
+        question: The question as typed.
+
+    Returns:
+        A sentence for the user.
+    """
+    asked = asked_alias(label, aliases, question)
+    alias = f"El {asked} es el mismo salón que el {label}. " if asked else ""
+    return reply(
+        "estimate_note", question, alias=alias, subject=with_article(label),
+        rooms=spoken_list(rooms), error=error,
+    )
 
 
 def with_article(label: str) -> str:
@@ -169,11 +230,7 @@ def no_sensor(label: str, aliases: list[str], rooms: list[str], question: str) -
     Returns:
         A sentence for the user.
     """
-    asked = None
-    for alias in aliases:
-        if alias != label and alias.isdigit() and alias in question.lower():
-            asked = alias
-            break
+    asked = asked_alias(label, aliases, question)
 
     # Room numbers go bare in a list ("3206, 3208"); names take their article
     # ("y la oficina mentores").
@@ -184,5 +241,4 @@ def no_sensor(label: str, aliases: list[str], rooms: list[str], question: str) -
 
     if asked:
         return reply("no_sensor_alias", question, asked=asked, label=label, rooms=listed)
-    named = with_article(label)
-    return reply("no_sensor", question, subject=named[:1].upper() + named[1:], rooms=listed)
+    return reply("no_sensor", question, subject=capitalized(label), rooms=listed)

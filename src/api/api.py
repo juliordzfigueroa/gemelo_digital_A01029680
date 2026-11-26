@@ -41,12 +41,14 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from api import estimates
 from api import retrieval as ret
 from common import config as cfg
 from common import data as dat
 from common import spaces
 from gru import predict as pred
 from llm import classifier, context, floor_prompt, llm_client, replies
+from llm import formatting as fmt
 
 
 # --------------------------------------------------------------------------
@@ -69,6 +71,7 @@ class Answer(BaseModel):
     horizon_min: int | None = None
     forecast_method: str | None = None
     warning: str | None = None
+    origin: str | None = None  # "medido" or "estimado"; None for a fixed reply
 
 
 # --------------------------------------------------------------------------
@@ -109,6 +112,12 @@ async def lifespan_handler(app: FastAPI):
         data = pd.DataFrame(columns=[cfg.TIME_COLUMN, cfg.SPACE_COLUMN, *cfg.ACTIVE_VARIABLES])
         print(f"ADVERTENCIA: sin datos: {e}")
     ret.STATE["data"] = data
+
+    reason = estimates.load(data)
+    if reason:
+        print(f"Sin estimaciones para salones sin sensor: {reason}")
+    else:
+        print("Estimaciones del generador listas para los salones sin sensor")
     yield
 
 
@@ -150,11 +159,18 @@ def _target_and_data(intent: classifier.Intent) -> tuple[int | None, int | None,
     space = intent.space_id
 
     if space is not None:
-        if ret.space_rows(space).empty:
-            label = str(spaces.labels().get(space, space))
+        if not ret.space_rows(space).empty:
+            return space, None, ret.retrieve(intent, space)
+        label = str(spaces.labels().get(space, space))
+        if not estimates.available(space):
             text = replies.no_sensor(label, spaces.aliases(space), ret.rooms_with_data(), question)
             return space, None, {"direct": text}
-        return space, None, ret.retrieve(intent, space)
+        # No sensor, but the generator can estimate it: the present state and
+        # the last day, never a GRU forecast or an anomaly check.
+        if intent.kind in ("current", "history"):
+            return space, None, estimates.estimate(intent, space, ret.latest_time())
+        template = "estimate_no_forecast" if intent.kind == "forecast" else "estimate_no_anomaly"
+        return space, None, {"direct": replies.reply(template, question, subject=replies.capitalized(label))}
 
     if intent.unknown_room:
         text = replies.unknown_room(
@@ -195,6 +211,7 @@ def health() -> dict:
         "rows_in_memory": 0 if data is None else int(len(data)),
         "data_source": str(cfg.REAL_DATA.name),
         "anomaly_detector": "3sigma" if ret.STATE["normalizer"] is not None else "unavailable",
+        "estimates": estimates.STATE["calibration"] is not None,
     }
 
 
@@ -308,9 +325,14 @@ def chat(question: Question) -> Answer:
         # missing than by an error the viewer has to interpret.
         response = f"No puedo responder ahora mismo. {e}"
     else:
-        # A floor answer: the model wrote the summary, the code adds the
-        # room-by-room detail.
+        # The code adds what the model must not be trusted with: the
+        # room-by-room detail of a floor, or the label of an estimate.
         detail = floor_prompt.detail(data) if data.get("scope") else ""
+        if data.get("origin") == "estimado":
+            detail = replies.estimate_note(
+                data["space"], spaces.aliases(space), data["based_on"],
+                fmt.expected_error(data["expected_error"]), question.question,
+            )
         if detail:
             response = f"{response.rstrip()}\n\n{detail}"
 
@@ -324,4 +346,5 @@ def chat(question: Question) -> Answer:
         horizon_min=data.get("horizon_min") if is_forecast else None,
         forecast_method=data.get("method") if is_forecast else None,
         warning=data.get("warning") or data.get("error") or data.get("detail"),
+        origin=data.get("origin", "medido"),
     )

@@ -72,6 +72,11 @@ def space_rows(space_id: int) -> pd.DataFrame:
     return own_rows.sort_values(cfg.TIME_COLUMN).reset_index(drop=True)
 
 
+def latest_time() -> pd.Timestamp:
+    """The newest reading in the data: the "now" of every answer."""
+    return pd.Timestamp(STATE["data"][cfg.TIME_COLUMN].max())
+
+
 def rooms_with_data() -> list[str]:
     """Return the labels of the spaces that have readings, sorted by id."""
     labels = spaces.labels()

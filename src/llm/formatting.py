@@ -162,6 +162,26 @@ def threshold_notes(values: dict) -> str:
     return "\n".join(notes)
 
 
+def expected_error(error: dict | None) -> str:
+    """Write the typical error of an estimate, one variable after another.
+
+    Args:
+        error: Per variable, from api.estimates.expected_error(), or None
+            when the validation was never run.
+
+    Returns:
+        Text such as "CO₂ ±181 ppm, temperatura ±1.4 °C".
+    """
+    if not error:
+        return "sin calcular (falta correr python -m generator.validate)"
+    parts = []
+    for variable in ("co2", "temperature", "humidity", "light"):
+        if variable in error:
+            decimals = 0 if variable == "co2" else 1
+            parts.append(f"{VARIABLE_NAMES[variable]} ±{error[variable]:.{decimals}f} {short_unit(variable)}".rstrip())
+    return ", ".join(parts)
+
+
 def anomaly(item: dict) -> str:
     """Describe one anomaly the detector found, for a prompt.
 
