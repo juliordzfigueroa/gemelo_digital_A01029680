@@ -52,7 +52,7 @@ Cada ecuación se puede revisar sola contra los datos: `python -m generator.co2`
 | Luz | k | Mediana de luz/radiación en fines de semana |
 | Luz | c | Horas de clase con sol |
 | Luz | cambios de estado | Conteo por hora, con y sin clase |
-| Movimiento | P(dispara), nivel | Con y sin clase |
+| Movimiento | P(dispara), niveles | Por situación: con clase, abierto sin clase (entre semana de 7 a 22 h) y cerrado (noches y fines de semana) |
 | Todas | ε | AR(1) de los residuos |
 
 Con la primera semana de datos:
@@ -112,14 +112,17 @@ Correlación del perfil del día (medias por hora):
 
 | Variable | Propios | Dejando fuera |
 |---|---|---|
-| CO₂ | 0.54 a 0.93 | 0.62 a 0.93 |
-| Humedad | 0.01 a 0.57 | −0.00 a 0.69 |
-| Temperatura | 0.99 a 1.00 | 0.84 a 0.90 |
-| Luz | 0.94 a 0.99 | 0.69 a 0.96 |
-| Movimiento | 0.76 a 0.94 | 0.78 a 0.93 |
+| CO₂ | 0.55 a 0.89 | 0.65 a 0.86 |
+| Humedad | 0.09 a 0.58 | −0.21 a 0.68 |
+| Temperatura | 0.99 a 1.00 | 0.83 a 0.90 |
+| Luz | 0.94 a 0.99 | 0.74 a 0.96 |
+| Movimiento | 0.78 a 0.93 | 0.76 a 0.94 |
 
-Error medio del perfil del día, dejando fuera: CO₂ de 124 a 289 ppm,
-temperatura de 0.8 a 2.0 °C, humedad de 2 a 12 %RH, luz de 4 a 11%.
+Error medio del perfil del día, dejando fuera: CO₂ de 139 a 307 ppm,
+temperatura de 0.8 a 2.0 °C, humedad de 2 a 12 %RH, luz de 5 a 10%. El
+promedio de cada uno es el error esperado que el chat pone en sus
+estimaciones (CO₂ ±193 ppm, temperatura ±1.4 °C, humedad ±5.1 %RH, luz
+±7.0 %).
 
 Lo que dicen:
 
