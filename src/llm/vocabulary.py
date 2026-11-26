@@ -78,6 +78,29 @@ MONTHS = {
 # Words after the hour that move it to the afternoon: "a las 5 de la tarde".
 AFTERNOON_WORDS = ["pm", "p.m.", "de la tarde", "de la noche"]
 
+WEEKDAYS = {
+    "lunes": 0, "martes": 1, "miércoles": 2, "miercoles": 2, "jueves": 3,
+    "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6,
+}
+
+# "El martes pasado" and "el próximo martes" pick the week; without them, the
+# tense of the question does (see api._moment).
+LAST_WEEK_WORDS = ["pasado"]
+NEXT_WEEK_WORDS = ["próximo", "proximo", "que viene", "siguiente"]
+
+# Days counted from the present, longest first so "pasado mañana" is found
+# before "mañana". "Mañana" alone is tomorrow; after "la" it is the morning.
+RELATIVE_DAYS = [
+    ("pasado mañana", 2), ("anteayer", -2), ("antier", -2),
+    ("ayer", -1), ("hoy", 0), ("mañana", 1),
+]
+
+# A part of the day, when the question gives no hour: "el martes en la tarde".
+DAY_PARTS = {
+    "en la mañana": 10, "por la mañana": 10, "al mediodía": 12, "al mediodia": 12,
+    "en la tarde": 16, "por la tarde": 16, "en la noche": 20, "por la noche": 20,
+}
+
 # --------------------------------------------------------------------------
 # Which variables
 # --------------------------------------------------------------------------

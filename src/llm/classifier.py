@@ -17,7 +17,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Reads the date and time a question asks about.
+    2026-11-26 - Reads the date, the weekday, the relative day and the time
+    a question asks about.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -85,7 +86,13 @@ class Intent:
         horizon_min: Minutes ahead, meaningful only when kind is "forecast".
         on_day: The date the question asks about ("el 3 de noviembre"), or
             None for the present.
-        at_time: The time of day it asks about ("a las 10"), or None.
+        weekday: A day of the week it names ("el martes"), Monday being 0,
+            or None. Which week is decided by api._moment.
+        week: "last" ("el martes pasado"), "next" ("el próximo martes") or
+            None, when the question says which week.
+        day_offset: Days from the present it names ("ayer" is -1), or None.
+        at_time: The time of day it asks about ("a las 10", "en la tarde"),
+            or None.
         original_text: The question as the user typed it, so the prompt can
             quote it back verbatim.
     """
@@ -99,6 +106,9 @@ class Intent:
     chat: str | None = None
     horizon_min: int = DEFAULT_HORIZON
     on_day: date | None = None
+    weekday: int | None = None
+    week: str | None = None
+    day_offset: int | None = None
     at_time: time | None = None
     original_text: str = ""
 
@@ -148,6 +158,9 @@ def classify(question: str) -> Intent:
         chat=chat,
         horizon_min=horizon,
         on_day=_extract_day(text),
+        weekday=_extract_weekday(text),
+        week=_extract_week(text),
+        day_offset=_extract_day_offset(text),
         at_time=_extract_time(text),
         original_text=question,
     )
@@ -339,6 +352,9 @@ def _extract_time(text: str) -> time | None:
     """
     found = CLOCK_TIME.search(text)
     if not found:
+        for phrase, hour in voc.DAY_PARTS.items():
+            if phrase in text:
+                return time(hour, 0)
         return None
     hour = int(found.group(1))
     minute = int(found.group(2) or 0)
@@ -348,6 +364,59 @@ def _extract_time(text: str) -> time | None:
     if hour > 23 or minute > 59:
         return None
     return time(hour, minute)
+
+
+def _extract_weekday(text: str) -> int | None:
+    """Find a day of the week the question names.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        Monday as 0 to Sunday as 6, or None.
+    """
+    for word, weekday in voc.WEEKDAYS.items():
+        if _contains_word(text, [word]):
+            return weekday
+    return None
+
+
+def _extract_week(text: str) -> str | None:
+    """Find whether the question says which week: "pasado" or "próximo".
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        "last", "next" or None. "Pasado mañana" is a day, not a week.
+    """
+    without_days = text.replace("pasado mañana", "")
+    if _contains_word(without_days, voc.LAST_WEEK_WORDS):
+        return "last"
+    if _contains_word(without_days, voc.NEXT_WEEK_WORDS):
+        return "next"
+    return None
+
+
+def _extract_day_offset(text: str) -> int | None:
+    """Find a day counted from the present: "hoy", "ayer", "mañana".
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        Days from the present, or None. "La mañana" (the morning) does not
+        count as tomorrow.
+    """
+    for phrase, offset in voc.RELATIVE_DAYS:
+        if phrase == "mañana":
+            # Only a "mañana" that does not follow "la": "mañana a las 9 de la
+            # mañana" is tomorrow, "a las 9 de la mañana" is today.
+            if re.search(r"(?<!la )\bmañana\b", text):
+                return offset
+        elif _contains_word(text, [phrase]):
+            return offset
+    return None
 
 
 def _extract_unknown_room(text: str) -> str | None:
