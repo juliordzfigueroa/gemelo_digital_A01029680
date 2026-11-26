@@ -92,5 +92,5 @@ class RoomGenerator:
             "temperature": float(t),
             "humidity": float(max(rh, 0.0)),
             "light": light.reading(lit, self.noise["light"]),
-            "motion": motion.step(students, p["motion"], self.rng),
+            "motion": motion.step(stamp, students, p["motion"], self.rng),
         }
