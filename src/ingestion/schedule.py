@@ -21,7 +21,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-10-12 - Initial implementation.
+    2026-11-26 - Paths and data loading from common; fixed stale names.
 
 Reference:
     Section 4.2.6 of the research document.
@@ -37,9 +37,9 @@ import numpy as np
 import pandas as pd
 
 from common import config as cfg
+from common import data as dat
 
-CONFIG_DIR = cfg.ROOT / "config"
-
+# Export column -> name used in this module. Anything not listed is dropped.
 COLUMNS = {
     "Clave Materia": "course",
     "v_Total Alum Inscritos (RE)": "students",
@@ -72,11 +72,11 @@ def _minutes(hhmm: pd.Series) -> pd.Series:
     return (values // 100) * 60 + values % 100
 
 
-def load_spaces(path: Path = CONFIG_DIR / "spaces.json") -> dict[str, int]:
+def load_spaces(path: Path = cfg.SPACES_FILE) -> dict[str, int]:
     """Map room numbers as written in the schedule to space_id.
 
     Args:
-        ruta: The shared space registry.
+        path: The shared space registry.
 
     Returns:
         A dict from room string ("3308") to space_id (308).
@@ -94,7 +94,7 @@ def load_schedule(path: Path) -> tuple[pd.DataFrame, dict]:
     """Read the schedule export and attach space_id.
 
     Args:
-        ruta: CSV exported from the registrar.
+        path: CSV exported from the registrar.
 
     Returns:
         A tuple of (one row per distinct class block, report). Identical rows
@@ -112,6 +112,7 @@ def load_schedule(path: Path) -> tuple[pd.DataFrame, dict]:
     df = raw[list(COLUMNS)].rename(columns=COLUMNS)
     rows = len(df)
     df = df.drop_duplicates()
+    distinct = len(df)
 
     df["students"] = df["students"].astype(int)
     df["start_date"] = pd.to_datetime(df["start_date"], format="%d/%m/%Y")
@@ -129,7 +130,7 @@ def load_schedule(path: Path) -> tuple[pd.DataFrame, dict]:
 
     return df.reset_index(drop=True), {
         "rows_read": rows,
-        "repeated_rows": rows - len(raw[list(COLUMNS)].drop_duplicates()),
+        "repeated_rows": rows - distinct,
         "distinct_blocks": len(df),
         "rooms_without_space": no_space,
     }
@@ -145,12 +146,12 @@ def possible_occupancy(
     blocks that are almost certainly not there.
 
     Args:
-        horarios: Output of load_schedule().
-        marcas: Interval start times.
+        schedule: Output of load_schedule().
+        stamps: Interval start times.
         space_id: Space to compute.
 
     Returns:
-        An array aligned with `marcas`: the largest enrolment among the blocks
+        An array aligned with `stamps`: the largest enrolment among the blocks
         active at that time, or 0.
     """
     own_blocks = schedule[schedule[cfg.SPACE_COLUMN] == space_id]
@@ -175,8 +176,8 @@ def compare(data: pd.DataFrame, schedule: pd.DataFrame) -> pd.DataFrame:
     """Contrast sensor readings inside and outside scheduled blocks, per day.
 
     Args:
-        datos: Cleaned contract frame from ingestion.cleaning.
-        horarios: Output of load_schedule().
+        data: Cleaned contract frame from ingestion.cleaning.
+        schedule: Output of load_schedule().
 
     Returns:
         One row per space and weekday with the mean movement fraction and eCO2
@@ -223,7 +224,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Check the schedule against sensors.")
     parser.add_argument("schedule", type=Path, help="schedule CSV export")
     parser.add_argument(
-        "--data", type=Path, default=cfg.PROCESSED_DATA / "aulas3.parquet"
+        "--data", default=None, help="contract frame; defaults to the cleaned sensor data"
     )
     args = parser.parse_args()
 
@@ -235,7 +236,7 @@ def main() -> int:
     if report["rooms_without_space"]:
         print(f"Salones que no estan en spaces.json: {report['rooms_without_space']}")
 
-    data = pd.read_parquet(args.data)
+    data = dat.load_data(args.data)
     table = compare(data, schedule)
 
     pd.set_option("display.width", 140)
