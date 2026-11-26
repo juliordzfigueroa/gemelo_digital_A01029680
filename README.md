@@ -304,8 +304,19 @@ Debe listar las cinco nubes. Con el visor abierto verás muchas líneas
 uvicorn api.api:app --port 8000
 ```
 
-Debe decir `GRU cargado` y `Datos en memoria`. Ahí aparece cada pregunta que
-llega al chat.
+Debe decir `GRU cargado`, `Datos en memoria` y `Datos del generador: 2026-09-14
+a 2026-12-06`. Ahí aparece cada pregunta que llega al chat.
+
+La última línea necesita el semestre generado. Se prepara una vez, y otra vez
+cada que cambien los datos limpios, en la consola 2 antes de arrancar la API:
+
+```bash
+python -m generator.calibrate     # parámetros de cada salón
+python -m generator.validate      # el error típico que el chat pone en sus notas (~30 s)
+python -m generator.generate      # el semestre completo (menos de un minuto)
+```
+
+Sin eso la API arranca igual, pero solo responde con lo medido.
 
 **Consola 3, Llama (opcional).** Ollama ya corre como servicio, así que no hay
 que arrancarlo; esta consola solo muestra su registro en vivo: cada respuesta
