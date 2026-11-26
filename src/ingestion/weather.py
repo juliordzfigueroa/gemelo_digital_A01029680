@@ -14,15 +14,19 @@ Two decisions worth knowing:
     it is warmed indoors. The moisture balance is written in absolute terms,
     and on the first week of data the indoor and outdoor absolute humidity
     matched within 0.3 g/m3.
-  - The archive is published with a delay of a few days. Hours it does not
-    have yet are taken from the forecast service, which also covers the
-    recent past, and every row records which source it came from.
+  - The archive only covers the past, published with a delay of a few
+    days, and refuses dates after today. The forecast service covers the
+    recent past and the next 16 days. So the archive is asked up to
+    yesterday, the forecast for the days after, and the forecast also fills
+    the hours the archive has not published yet. Every row records which
+    service it came from.
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Weather columns listed once; fixed stale names.
+    2026-11-26 - Future dates from the forecast service, so a whole semester
+    can be downloaded.
 
 Reference:
     Open-Meteo API: https://open-meteo.com/en/docs
@@ -33,7 +37,7 @@ Reference:
 from __future__ import annotations
 
 import argparse
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import numpy as np
@@ -127,12 +131,25 @@ def download(since: date, until: date) -> pd.DataFrame:
         'source' column saying whether each hour came from the archive or the
         forecast service.
     """
-    archive = _query(ARCHIVE_URL, since, until)
-    archive["source"] = "archive"
+    yesterday = date.today() - timedelta(days=1)
+    parts = []
+    if since <= yesterday:
+        past = _query(ARCHIVE_URL, since, min(until, yesterday))
+        past["source"] = "archive"
+        parts.append(past)
+    if until > yesterday:
+        ahead = _query(FORECAST_URL, max(since, yesterday + timedelta(days=1)), until)
+        ahead["source"] = "forecast"
+        parts.append(ahead)
+    archive = pd.concat(parts, ignore_index=True)
 
+    # The archive's latest days are not published yet; the forecast service
+    # has them. Only those days are asked, since it does not reach far back.
     missing = archive[list(VARIABLES.values())].isna().any(axis=1)
     if missing.any():
-        forecast = _query(FORECAST_URL, since, until).set_index(cfg.TIME_COLUMN)
+        first = archive.loc[missing, cfg.TIME_COLUMN].min().date()
+        last = archive.loc[missing, cfg.TIME_COLUMN].max().date()
+        forecast = _query(FORECAST_URL, first, last).set_index(cfg.TIME_COLUMN)
         index = archive.loc[missing, cfg.TIME_COLUMN]
         replacement = forecast.reindex(index)
         for column in VARIABLES.values():
