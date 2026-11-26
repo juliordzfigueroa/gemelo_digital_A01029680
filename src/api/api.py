@@ -102,7 +102,7 @@ async def lifespan_handler(app: FastAPI):
         data = dat.load_data()
         print(
             f"Datos en memoria: {len(data):,} filas, espacios "
-            f"{sorted(data[cfg.SPACE_COLUMN].unique())}, hasta "
+            f"{sorted(int(s) for s in data[cfg.SPACE_COLUMN].unique())}, hasta "
             f"{data[cfg.TIME_COLUMN].max()}"
         )
     except FileNotFoundError as e:
