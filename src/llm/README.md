@@ -38,7 +38,7 @@ Cada pregunta tiene un **tipo**, que decide qué datos se buscan, y un
 | Actual | "¿Cómo está el CO₂ del 3308?" | Última lectura de las variables que nombras (todas si no nombras ninguna) |
 | Pronóstico | "¿Cómo va a estar el 3308 en 45 minutos?" | GRU: directo hasta 30 min, iterativo hasta 2 h, en pasos de 5 min |
 | Histórico | "¿Cuál fue el máximo de CO₂ en el 3206?" | Máximo, mínimo y promedio de **una** variable en las últimas 24 h |
-| Anomalía | "¿Hay algo raro en el 3305?" | Que el detector todavía no existe; nunca un "todo bien" inventado |
+| Anomalía | "¿Hay algo raro en el 3305?" | El detector 3σ sobre la última lectura de CO₂, temperatura, humedad y luz, más los rangos de confort aparte. Si no puede revisar, lo dice; nunca un "todo bien" inventado |
 
 | Objetivo | Cómo se reconoce | Qué responde |
 |---|---|---|
@@ -79,8 +79,8 @@ capital de Francia?".
 
 **Lo que todavía no puede:** recordar la pregunta anterior ("¿y en una
 hora?"), comparar dos salones, fechas u horas concretas ("el martes a las
-10"), más de una variable en el histórico, detectar anomalías, y datos en
-vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
+10"), más de una variable en el histórico, detectar sensores atascados, y
+datos en vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
 3208, 3304 (sin CO₂ casi siempre), 3305, 3308 y la oficina 4-2.
 
 **Fallas conocidas de redacción:** Llama omite a veces la advertencia de la
@@ -177,23 +177,25 @@ python -m llm.classifier
 | Construcción de prompts | **real** |
 | Preguntas por piso, con resumen calculado en la API | **real** |
 | Fuente de datos | archivo limpio `data/processed/aulas3.parquet`. `TODO E5` |
-| Detector de anomalías 3σ | **no existe** |
+| Detector de anomalías 3σ | **real**, sobre la última lectura; resultados en `src/anomaly/README.md` |
 | Llama 3.1 8B | **real**, vía Ollama (3 a 7 s por respuesta en la RTX 4090) |
 
 Cuando haya acceso a la base de datos del Tec, lo único que cambia es
 `space_rows()` en `api/retrieval.py`, marcado `TODO E5`: todo lo demás,
 incluidas las preguntas por piso, lee los datos a través de esa función.
 
-### Sobre el detector que no existe
+### Sobre el detector de anomalías
 
-`anomaly_data()` (en `api/retrieval.py`) devuelve `state: "unavailable"`,
-**no una lista vacía de anomalías**. La distinción no es cosmética: una lista
-vacía significa que el detector corrió y no encontró nada, y afirmar eso
-mientras no hay detector le pondría al usuario un «todo bien» falso enfrente.
-Esa es exactamente la respuesta que esta capa no debe producir nunca. El prompt
-de anomalías (`context._prompt_anomaly`) solo tiene ese caso: le ordena al
-modelo decir que la capacidad no está disponible. Cuando exista el detector,
-habrá que escribir el prompt para cuando sí encuentre anomalías.
+`anomaly_data()` (en `api/retrieval.py`) revisa la última lectura con la regla
+3σ de `src/anomaly/detector.py`. Distingue tres estados y nunca los mezcla: no
+se pudo revisar (`unavailable`, con la razón), revisó y no encontró nada, y
+revisó y encontró algo. Una lista vacía de anomalías solo aparece cuando el
+detector sí corrió: decir "no hay nada" sin haber revisado le pondría al
+usuario un «todo bien» falso enfrente, y esa es la respuesta que esta capa no
+debe producir nunca.
+
+Qué detecta y qué no, medido con anomalías inyectadas, está en
+[src/anomaly/README.md](../anomaly/README.md).
 
 ---
 

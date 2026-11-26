@@ -466,23 +466,24 @@ servidores Flask.
 
 3. **[src/api/retrieval.py](../src/api/retrieval.py).** De dónde salen los
    números.
-   - `STATE` (línea 50) y `space_rows` (línea 62): la única función que
+   - `STATE` (línea 46) y `space_rows` (línea 58): la única función que
      cambia cuando llegue la base de datos del Tec (`TODO E5`).
-   - `current_data`, `history_data` y `forecast_data` (líneas 100, 124 y
-     177): un salón.
-   - `floor_data` (línea 258): un piso o el edificio; `_floor_summary` (línea
-     359) calcula el promedio y los extremos.
+   - `current_data`, `history_data`, `anomaly_data` y `forecast_data`
+     (líneas 96, 120, 154 y 208): un salón.
+   - `floor_data` (línea 289): un piso o el edificio; `_floor_summary` (línea
+     402) calcula el promedio y los extremos.
 
 4. **[src/llm/context.py](../src/llm/context.py).** Los prompts de un salón.
    `SYSTEM_PROMPT` (línea 41) son las reglas; `build_prompt` (línea 57) elige
    qué prompt armar.
 
 5. **[src/llm/floor_prompt.py](../src/llm/floor_prompt.py).** El prompt de un
-   piso (`prompt`, línea 51) y el detalle por salón (`detail`, línea 167).
+   piso (`prompt`, línea 59) y el detalle por salón (`detail`, línea 227).
 
 6. **[src/llm/formatting.py](../src/llm/formatting.py).** Cómo se escriben los
    números. `threshold_notes` (línea 129) pone las etiquetas "ALTO" o "por
-   encima del rango de confort"; `trend` (línea 165) escribe "sube 62.8 ppm".
+   encima del rango de confort"; `trend` (línea 202) escribe "sube 62.8 ppm";
+   `anomaly` escribe cada anomalía que encontró el detector.
 
 7. **[src/llm/replies.py](../src/llm/replies.py).** Las frases fijas.
    `TEMPLATES` (línea 38) trae las plantillas; `reply` (línea 91) escoge una
@@ -496,6 +497,18 @@ servidores Flask.
 9. **[src/common/spaces.py](../src/common/spaces.py).** El registro de
    salones: `labels` (línea 39) convierte 308 en "3308" y `space_4_2` en
    "oficina 4-2".
+
+10. **[src/anomaly/detector.py](../src/anomaly/detector.py)** y
+    **[src/anomaly/evaluate.py](../src/anomaly/evaluate.py).** El detector de
+    anomalías de la sección 4.2.5.
+    - `deviation` (línea 37): a cuántas sigmas está un valor de la media. Es
+      la única fórmula; `check` (línea 53, una lectura, para el chat) y
+      `flags` (línea 100, miles de lecturas, para la evaluación) la usan
+      igual.
+    - `inject_spikes`, `inject_damaged` e `inject_stuck` (líneas 88, 101 y
+      110): las tres anomalías sintéticas.
+    - `score` (línea 142): precisión y recall. Los resultados están en
+      [src/anomaly/README.md](../src/anomaly/README.md).
 
 ### Preguntas para comprobar
 

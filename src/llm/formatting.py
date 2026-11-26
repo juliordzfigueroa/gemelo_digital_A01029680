@@ -10,7 +10,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Moved here from context.py.
+    2026-11-26 - Moved here from context.py; added the anomaly lines.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -160,6 +160,43 @@ def threshold_notes(values: dict) -> str:
             notes.append(f"  {variable} {value:.1f} {unit}: por encima del {comfort}")
 
     return "\n".join(notes)
+
+
+def anomaly(item: dict) -> str:
+    """Describe one anomaly the detector found, for a prompt.
+
+    Only the limit that was crossed is named: the lower end of the CO2 band
+    is negative, and printing it would only confuse.
+
+    Args:
+        item: One entry of anomaly.detector.check().
+
+    Returns:
+        Text such as "co2 2400.0 ppm, 3.3σ por encima de lo normal (límite
+        normal 2251.1 ppm)".
+    """
+    variable = item["variable"]
+    unit = UNIT_LABELS.get(variable, "")
+    low, high = item["band"]
+    limit = high if item["direction"] == "por encima" else low
+    return (
+        f"{variable} {number(item['value'])} {unit}, {abs(item['sigma']):.1f}σ "
+        f"{item['direction']} de lo normal (límite normal {number(limit)} {unit})"
+    )
+
+
+def anomaly_short(item: dict) -> str:
+    """Describe one anomaly in a few words, for the room-by-room detail.
+
+    Args:
+        item: One entry of anomaly.detector.check().
+
+    Returns:
+        Text such as "CO₂ 2400.0 ppm (3.3σ por encima)".
+    """
+    variable = item["variable"]
+    value = f"{VARIABLE_NAMES.get(variable, variable)} {number(item['value'])} {short_unit(variable)}"
+    return f"{value.rstrip()} ({abs(item['sigma']):.1f}σ {item['direction']})"
 
 
 def trend(variable: str, now: object, later: object) -> str:

@@ -6,20 +6,20 @@ forecast_data, anomaly_data) and one for a whole floor or the building
 Every number the user reads comes out of here or out of the GRU, never out of
 the LLM.
 
-What is wired and what is not. The GRU is real: the forecast comes from the
-trained checkpoint in models/. The data source is not: everything reads the
-cleaned sensor file written by ingestion.cleaning, loaded at startup, because
-the Tec database is not reachable yet. So "current" means the latest reading
-in that file, not the present moment. space_rows() is the one place that
-changes when the database is; it is marked `TODO E5`. The anomaly detector
-does not exist at all, and anomaly_data() says so rather than reporting that
-nothing was found, which would be a different claim entirely.
+What is wired and what is not. The GRU and the 3-sigma anomaly detector are
+real: the forecast comes from the trained checkpoint in models/, and the
+detector uses the mean and sigma stored next to it. The data source is not:
+everything reads the cleaned sensor file written by ingestion.cleaning,
+loaded at startup, because the Tec database is not reachable yet. So
+"current" means the latest reading in that file, not the present moment.
+space_rows() is the one place that changes when the database is; it is
+marked `TODO E5`.
 
 Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Moved here from api.py; one summary per kind of question.
+    2026-11-26 - Anomaly questions answered by the 3-sigma detector.
 
 Reference:
     Sections 4.3.1 to 4.3.4 of the research document.
@@ -31,6 +31,7 @@ from typing import Any
 
 import pandas as pd
 
+from anomaly import detector as det
 from common import config as cfg
 from common import spaces
 from gru import predict as pred
@@ -39,11 +40,6 @@ from llm import classifier
 # Default span for a historical question when the user names no period.
 HISTORY_HOURS = 24
 
-# What an anomaly question gets until the 3-sigma detector exists.
-ANOMALY_DETAIL = (
-    "El detector de anomalías (regla 3σ) todavía no está implementado, "
-    "así que no se ha evaluado si hay anomalías."
-)
 
 # Process-wide state, filled once by the API at startup. Reloading the
 # checkpoint per request would add seconds of latency to every question.
@@ -155,23 +151,58 @@ def history_data(space_id: int, variable: str, hours: int = HISTORY_HOURS) -> di
     }
 
 
-def anomaly_data(space_id: int) -> dict:
-    """Report that the anomaly detector is not available.
-
-    TODO E5: replace with a call to the anomaly detector once it exists.
+def anomaly_data(space_id: int, variables: list[str] | None = None) -> dict:
+    """Check the latest reading of one space with the 3-sigma detector.
 
     Args:
         space_id: Space identifier.
+        variables: The variables the question named; None or empty checks
+            all of them.
 
     Returns:
-        A dict shaped for context._prompt_anomaly.
+        A dict shaped for context._prompt_anomaly: state "evaluated" with the
+        reading and the anomalies found (possibly none), or "unavailable"
+        with the reason it could not be checked. The two are never confused:
+        reporting "nothing found" when nothing ran would be a false all-clear.
     """
+    reason, checked = _anomaly_check_plan(variables)
+    if reason:
+        return {"space": space_id, "state": "unavailable", "anomalies": [], "detail": reason}
+
+    current = current_data(space_id)
+    readings = {v: current["readings"].get(v) for v in checked}
     return {
         "space": space_id,
-        "state": "unavailable",
-        "anomalies": [],
-        "detail": ANOMALY_DETAIL,
+        "state": "evaluated",
+        "timestamp": current["timestamp"],
+        "checked": checked,
+        "readings": readings,
+        "anomalies": det.check(readings, STATE["normalizer"].parameters),
     }
+
+
+def _anomaly_check_plan(variables: list[str] | None) -> tuple[str | None, list[str]]:
+    """Decide which variables the detector can check, or why it cannot.
+
+    Args:
+        variables: The variables the question named, possibly none.
+
+    Returns:
+        A tuple of (reason it cannot run, or None; variables to check).
+    """
+    normalizer = STATE["normalizer"]
+    if normalizer is None:
+        reason = (
+            "El detector de anomalías usa la media y la desviación estándar del "
+            f"entrenamiento del GRU, y el modelo no está cargado: {STATE['model_error']}"
+        )
+        return reason, []
+
+    checked = [v for v in normalizer.parameters if not variables or v in variables]
+    if not checked:
+        # Only motion was asked about, and the detector does not check it.
+        return "El detector no revisa el movimiento: es una variable binaria (0 o 1).", []
+    return None, checked
 
 
 def forecast_data(intent: classifier.Intent, space_id: int) -> dict:
@@ -243,7 +274,7 @@ def retrieve(intent: classifier.Intent, space_id: int) -> dict:
         variable = intent.variables[0] if intent.variables else "co2"
         data = history_data(space_id, variable)
     elif intent.kind == "anomaly":
-        data = anomaly_data(space_id)
+        data = anomaly_data(space_id, intent.variables)
     else:
         data = current_data(space_id)
     # The prompt names the space by its room number: given the id, Llama
@@ -292,9 +323,11 @@ def floor_data(intent: classifier.Intent, floor: int | None) -> dict:
         "errors": [],
     }
     if intent.kind == "anomaly":
-        data["state"] = "unavailable"
-        data["detail"] = ANOMALY_DETAIL
-        return data
+        reason, checked = _anomaly_check_plan(intent.variables)
+        if reason:
+            data["state"], data["detail"] = "unavailable", reason
+            return data
+        data["state"], data["variables"] = "evaluated", checked
 
     labels = spaces.labels()
     for space_id in space_ids:
@@ -307,6 +340,11 @@ def floor_data(intent: classifier.Intent, floor: int | None) -> dict:
             item = history_data(space_id, variables[0])
             data["rooms"].append({"room": room, "summary": item["summary"]})
             data["since"], data["until"] = item.get("since"), item.get("until")
+        elif intent.kind == "anomaly":
+            item = anomaly_data(space_id, intent.variables)
+            data["rooms"].append({
+                "room": room, "timestamp": item["timestamp"], "anomalies": item["anomalies"],
+            })
         else:
             item = current_data(space_id)
             readings = {v: item["readings"].get(v) for v in variables}
@@ -316,8 +354,13 @@ def floor_data(intent: classifier.Intent, floor: int | None) -> dict:
         data["summary"] = _floor_summary(data["rooms"], "predicted", variables)
     elif intent.kind == "history":
         data["summary"] = _history_summary(data["rooms"], variables[0])
+    elif intent.kind == "anomaly":
+        with_anomalies = [r["room"] for r in data["rooms"] if r["anomalies"]]
+        data["summary"] = {"rooms_with_anomalies": with_anomalies}
     else:
         data["summary"] = _floor_summary(data["rooms"], "readings", variables)
+
+    if intent.kind in ("current", "anomaly"):
         stamps = [r["timestamp"] for r in data["rooms"] if r["timestamp"]]
         data["timestamp"] = max(stamps) if stamps else None
     return data

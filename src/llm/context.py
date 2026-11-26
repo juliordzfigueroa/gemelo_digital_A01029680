@@ -21,7 +21,7 @@ Author:
 
 Last modified:
     2026-11-26 - Floor prompts and number formatting moved to their own
-    files; removed the prompt for a detector that does not exist yet.
+    files; the anomaly prompt reads the 3-sigma detector.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -189,33 +189,62 @@ def _prompt_history(intent: Intent, data: dict) -> str:
 
 
 def _prompt_anomaly(intent: Intent, data: dict) -> str:
-    """Say that anomalies cannot be evaluated yet.
+    """Describe what the 3-sigma detector found in the latest reading.
 
-    The 3-sigma detector of the research document does not exist yet, so this
-    is the only answer there is. An empty list of anomalies and an absent
-    detector are different claims: reporting "nothing found" when nothing ran
-    would hand the user a false all-clear, the one answer this layer must
-    never produce.
+    Three cases, kept apart on purpose: it could not run, it ran and found
+    nothing, it ran and found something. Reporting "nothing found" when
+    nothing ran would hand the user a false all-clear, the one answer this
+    layer must never produce.
+
+    The comfort ranges go in too, labelled as such: a CO2 of 1,162 ppm is
+    within the statistical band and still "ALTO" for a person, and without
+    that line the model would read "no anomalies" as "all is well".
 
     Args:
         intent: The classified question.
-        data: Expects "space" and "detail".
+        data: Expects "space" and "state"; when evaluated, also "timestamp",
+            "checked", "readings" and the list of "anomalies"; when
+            unavailable, the "detail" saying why.
 
     Returns:
         The user prompt.
     """
-    return "\n".join([
-        f"El usuario preguntó: «{intent.original_text}»",
+    space = data.get("space", "desconocido")
+    parts = [f"El usuario preguntó: «{intent.original_text}»", ""]
+
+    if data.get("state") == "unavailable":
+        parts += [
+            f"NO SE PUDO EVALUAR el espacio {space}: {data.get('detail', '')}",
+            "Dile al usuario que esta revisión no está disponible y por qué. "
+            "No afirmes que no hay anomalías.",
+        ]
+    else:
+        checked = ", ".join(fmt.VARIABLE_NAMES.get(v, v) for v in data.get("checked", []))
+        parts.append(
+            f"DETECTOR DE ANOMALÍAS (regla 3σ) del espacio {space}, lectura de las "
+            f"{data.get('timestamp', 'hora desconocida')}. Variables revisadas: {checked}."
+        )
+        anomalies = data.get("anomalies", [])
+        if anomalies:
+            parts.append(f"Encontró {len(anomalies)} anomalía(s):")
+            for item in anomalies:
+                parts.append(f"  - {fmt.anomaly(item)}")
+        else:
+            parts.append(
+                "No encontró anomalías: todas las variables revisadas están dentro "
+                "de su banda normal."
+            )
+        notes = fmt.threshold_notes(data.get("readings", {}))
+        if notes:
+            parts += ["", "RANGOS DE CONFORT (otra referencia, aparte del detector):", notes]
+
+    parts += [
         "",
-        f"NO SE PUDO EVALUAR el espacio {data.get('space', 'desconocido')}: "
-        + data.get("detail", "el detector de anomalías todavía no está implementado."),
-        "Dile al usuario que esta capacidad aún no está disponible. "
-        "No afirmes que no hay anomalías.",
-        "",
-        "Responde en español usando solo estos datos. Si hay anomalías, "
-        "di qué tan grave es y recomienda una acción concreta. Si no se "
-        "pudieron evaluar, dilo y no inventes un diagnóstico.",
-    ])
+        "Responde en español usando solo estos datos. Si hay anomalías, dilas "
+        "primero con su valor y aclara que pueden venir del ambiente o de una "
+        "falla del sensor. Si no las hay, dilo sin exagerar.",
+    ]
+    return "\n".join(parts)
 
 
 def _milestones(predictions: list[dict]) -> list[dict]:
@@ -274,10 +303,17 @@ def main() -> int:
             },
         ),
         (
-            "¿Hay algo raro en el 3208?",
+            "¿Hay algo raro en el 3206?",
             {
-                "space": "3208",
-                "detail": "el detector de anomalías todavía no está implementado.",
+                "space": "3206",
+                "state": "evaluated",
+                "timestamp": "2026-10-12 10:30",
+                "checked": ["co2", "temperature", "humidity", "light"],
+                "readings": {"co2": 2400.0, "temperature": 24.1, "humidity": 52.0, "light": 55.0},
+                "anomalies": [{
+                    "variable": "co2", "value": 2400.0, "sigma": 3.3,
+                    "band": [-520.4, 2251.1], "direction": "por encima",
+                }],
             },
         ),
     ]

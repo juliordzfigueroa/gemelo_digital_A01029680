@@ -194,7 +194,7 @@ def health() -> dict:
         "ollama_detail": reason,
         "rows_in_memory": 0 if data is None else int(len(data)),
         "data_source": str(cfg.REAL_DATA.name),
-        "anomaly_detector": "not_implemented",
+        "anomaly_detector": "3sigma" if ret.STATE["normalizer"] is not None else "unavailable",
     }
 
 
