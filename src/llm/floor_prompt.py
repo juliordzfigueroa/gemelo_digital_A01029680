@@ -24,7 +24,7 @@ from llm.classifier import Intent
 
 # The last instruction of every floor prompt.
 SUMMARY_ONLY = (
-    "Escribe SOLO el resumen de {phrase}, en una o dos oraciones: el "
+    "Escribe SOLO el resumen {of_phrase}, en una o dos oraciones: el "
     "promedio, los espacios extremos y, si los hay, los que están fuera de "
     "rango. Usa únicamente los adjetivos de la sección FUERA DE RANGO. No "
     "hagas una lista por salón ni menciones espacios sin datos: el detalle lo "
@@ -33,7 +33,7 @@ SUMMARY_ONLY = (
 
 # The same instruction for an anomaly question, which has no average to give.
 ANOMALIES_ONLY = (
-    "Escribe SOLO el resumen de {phrase}, en una o dos oraciones: cuántos "
+    "Escribe SOLO el resumen {of_phrase}, en una o dos oraciones: cuántos "
     "espacios tienen anomalías y en qué variable, o que no hay ninguna. No "
     "hagas una lista por salón ni menciones espacios sin datos: el detalle lo "
     "agrega el sistema."
@@ -92,7 +92,7 @@ def prompt(intent: Intent, data: dict) -> str:
     kind = data.get("kind")
     if kind == "anomaly":
         parts += _anomaly_summary(data)
-        parts += ["", ANOMALIES_ONLY.format(phrase=phrase)]
+        parts += ["", ANOMALIES_ONLY.format(of_phrase=_of(phrase))]
         return "\n".join(parts)
 
     if kind == "forecast":
@@ -101,8 +101,18 @@ def prompt(intent: Intent, data: dict) -> str:
         parts += _history_summary(data)
     else:
         parts += _current_summary(data)
-    parts += ["", SUMMARY_ONLY.format(phrase=phrase)]
+    parts += ["", SUMMARY_ONLY.format(of_phrase=_of(phrase))]
     return "\n".join(parts)
+
+
+def _of(phrase: str) -> str:
+    """Put "de" before a phrase, contracted when it starts with "el".
+
+    "el piso 3" becomes "del piso 3"; "la planta baja", "de la planta baja".
+    """
+    if phrase.startswith("el "):
+        return "del " + phrase[3:]
+    return "de " + phrase
 
 
 def _of_what(data: dict) -> str:
