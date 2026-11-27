@@ -7,23 +7,25 @@ Llama 3.1 8B servido por Ollama, orquestado por FastAPI.
 
 ## Qué se le puede preguntar
 
-Desde el chat del visor o `POST /chat`. Hay dos familias de respuesta:
+Desde el chat del visor o `POST /chat`. Hay tres familias de respuesta:
 
 - **Respuestas con datos.** Cuatro tipos (lectura actual, pronóstico,
   histórico, anomalía) sobre un objetivo (un salón, un piso o todo el
   edificio). Los números los pone el código; Llama redacta.
+- **Preguntas sobre las etiquetas.** Qué quieren decir "medido", "simulado"
+  y "estimado", o de dónde sale un valor. Llama redacta a partir de hechos
+  fijos de `glossary.py`, y el código revisa lo que escribió.
 - **Respuestas de la herramienta.** Saludos, agradecimientos, preguntas
-  fuera de tema, preguntas que no dicen dónde, salones que no existen,
-  salones sin sensor y qué significan las etiquetas de una respuesta. No
-  llevan datos que redactar, así que las contesta el código con frases fijas
-  de `replies.py` y `glossary.py`, sin llamar a Llama.
+  fuera de tema, preguntas que no dicen dónde, salones que no existen y
+  salones sin sensor. No llevan datos que redactar, así que las contesta el
+  código con frases fijas de `replies.py`, sin llamar a Llama.
 
 Al abrir el visor, el chat empieza con una bienvenida (`GET /welcome`): qué
 se le puede preguntar y qué quieren decir "medido", "simulado" y "estimado",
 con los salones que tienen sensor y el error típico tomados de los datos.
 
 ```
-pregunta ─► clasificador ─┬─ ¿qué significa una etiqueta? ───── sí ─► la definición
+pregunta ─► clasificador ─┬─ ¿pregunta por una etiqueta? ────── sí ─► la explicación (Llama, revisada)
                           ├─ ¿nombra salón, piso o edificio? ── sí ─► respuesta con datos (Llama)
                           │                                            o "no tiene sensor"
                           └─ no ─┬─ pide algo de un chatbot general ─► fuera de tema
@@ -70,14 +72,39 @@ recibe la misma respuesta y una demostración se puede repetir.
 | Salón sin sensor, de un tipo medido | "3309", "¿cuál fue el máximo de CO₂ del 3301?", "¿cómo va a estar el 3201 en una hora?" | Una **estimación** del generador (lectura, historial o pronóstico), con una nota escrita por el código: que es estimado, de qué salones sale y su error típico. Anomalías no: solo se buscan en lecturas reales |
 | Espacio sin sensor de un tipo nunca medido | "sala de juntas 2" | Que no tiene sensor y cuáles sí tienen datos |
 | Alias | "3302" | Que corresponde al 3301 (el 3302 no existe físicamente), y su estimación |
-| Qué significa una etiqueta | "¿qué significa que un salón esté estimado?", "¿qué diferencia hay entre simulado y estimado?", "¿qué es el error típico?", "¿qué significan las etiquetas?" | La definición de cada etiqueta que nombra, con los datos que la respaldan |
-| Por qué un salón lleva una etiqueta | "¿por qué el 3201 sale estimado?", "¿por qué el 3308 dice simulado?" | Primero qué le toca a ese salón (sensor propio, sensor con pocos datos, sin sensor, tipo nunca medido) y de qué salones sale; luego la definición |
+### Preguntas sobre las etiquetas
 
-Una pregunta de significado necesita la etiqueta ("estimado", "simulado",
-"medido", "medidos y estimados", "error típico", "generador") y una forma de
-preguntar qué es ("qué significa", "qué es", "por qué", "qué diferencia",
-"qué tan confiable"), y gana aunque nombre un salón. Con solo la etiqueta,
-"¿cómo está el 3201 estimado?" sigue siendo una lectura.
+| Caso | Ejemplo | Respuesta |
+|---|---|---|
+| Qué significa una etiqueta | "¿qué significa que un salón esté estimado?", "¿qué pasa si un salón está estimado?", "¿qué diferencia hay entre simulado y estimado?", "¿qué es el GRU?", "¿le puedo creer a lo estimado?" | Qué quiere decir y de dónde sale el valor: el sensor, el generador físico o el GRU |
+| Por qué un salón lleva una etiqueta | "¿por qué el 3201 sale estimado?", "¿por qué el 3308 dice simulado?" | Qué le toca a ese salón (sensor propio, sensor con pocos datos, sin sensor, tipo nunca medido) y de qué salones sale |
+
+**Cuándo es una de estas preguntas.** Si trae una etiqueta ("estimado",
+"simulado", "medido", "medidos y estimados", "generador", "GRU") y no nombra
+lugar ni pide datos, solo puede ser sobre la etiqueta: "salones estimados",
+"no entiendo lo de simulado". Si nombra un salón o pide datos, además tiene
+que preguntar qué es ("qué significa", "por qué", "qué pasa", "no entiendo",
+"de dónde viene"): "¿cómo está el 3201 estimado?" sigue siendo una lectura, y
+"¿cuál fue el CO₂ medido ayer?", una pregunta sin lugar. Una letra de más o
+de menos en las palabras largas se perdona ("esimado").
+
+**Cómo se responde.** El código junta los hechos: la definición de cada
+etiqueta y, si nombra un salón, lo que le toca a ese salón, con sus fechas y
+los salones de los que sale. Llama los cuenta en dos o tres oraciones, de
+tú; el prompt trae dos ejemplos de respuesta, porque a un modelo de 8B le
+enseñan el tono mejor que las reglas. Después el código revisa:
+
+- que cada número que escribió esté en los hechos (así se rechazó "si un
+  piso tiene 10 salones medidos y 5 estimados", que inventó);
+- que no califique ni dé causas que los hechos no dan ("no es confiable",
+  "el sensor no está funcionando");
+- que no empiece con un sí o un no ("No, no es una lectura" se lee como "no
+  le creas").
+
+Si pasa, se le agrega una línea del código: que lo simulado y lo estimado
+salen del generador físico y no del GRU, y su error típico. Si no pasa, o
+Ollama está apagado, la respuesta son los hechos tal cual, que están
+escritos para leerse.
 
 Si el texto nombra un salón y un piso ("el 3308 del piso 3"), gana el salón.
 El lugar sale siempre del texto: la petición solo lleva la pregunta.

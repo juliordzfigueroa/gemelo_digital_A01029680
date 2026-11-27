@@ -417,8 +417,13 @@ misma pregunta siempre siga el mismo camino.
 
 **Respuestas directas.** Cuando no hay datos que redactar (un saludo, algo
 fuera de tema, un salón que no existe o que no tiene sensor, una pregunta que
-no dice dónde, "¿qué significa estimado?"), el código contesta con frases
-fijas y Llama ni se entera. La bienvenida del chat también es del código.
+no dice dónde), el código contesta con frases fijas y Llama ni se entera. La
+bienvenida del chat también es del código.
+
+**Preguntas sobre las etiquetas.** "¿Qué significa estimado?" la redacta
+Llama a partir de hechos fijos, y el código la revisa antes de mostrarla:
+números que no están en los hechos, juicios como "no es confiable", o un sí
+o un no al principio. Si falla, se muestran los hechos tal cual.
 
 **Dos prompts.** El de sistema son las reglas fijas (máximo 3 oraciones, solo
 los datos recibidos, con unidades). El de usuario lleva la pregunta y los
@@ -457,20 +462,23 @@ servidores Flask.
    - `_target_and_data` (línea 235): el ruteo. Lee los `if` en orden: qué
      significa una etiqueta, salón, número desconocido, piso, edificio,
      charla, y al final "¿de qué salón?".
-   - `welcome` (línea 394): la ruta `/welcome`, el primer mensaje del chat.
-   - `chat` (línea 443): la cadena completa de una pregunta.
+   - `_glossary_data` y `_explained` (líneas 295 y 324): una pregunta sobre
+     una etiqueta. El primero junta los hechos y el prompt; el segundo le
+     pide la redacción a Llama y la revisa.
+   - `welcome` (línea 442): la ruta `/welcome`, el primer mensaje del chat.
+   - `chat` (línea 493): la cadena completa de una pregunta.
 
 2. **[src/llm/classifier.py](../src/llm/classifier.py)** y
    **[src/llm/vocabulary.py](../src/llm/vocabulary.py).**
-   - `classify` (línea 120): junta todo en un `Intent`.
-   - `_detect_kind` (línea 233): la prioridad anomalía > pronóstico > historial
+   - `classify` (línea 121): junta todo en un `Intent`.
+   - `_detect_kind` (línea 282): la prioridad anomalía > pronóstico > historial
      > actual.
-   - `_extract_space`, `_extract_floor` y `_extract_horizon` (líneas 299, 314
-     y 469): el salón, el piso y los minutos.
-   - `_detect_chat` (línea 198): saludo, agradecimiento o fuera de tema.
-   - `_extract_terms` (línea 174): qué etiqueta pregunta qué significa
-     ("estimado", "simulado"…). Necesita la etiqueta y una forma de preguntar
-     ("qué significa", "por qué").
+   - `_extract_space`, `_extract_floor` y `_extract_horizon` (líneas 348, 363
+     y 518): el salón, el piso y los minutos.
+   - `_detect_chat` (línea 252): saludo, agradecimiento o fuera de tema.
+   - `_extract_terms` (línea 176): por qué etiqueta pregunta ("estimado",
+     "simulado"…). Basta la etiqueta si no hay lugar ni datos; si los hay,
+     también una forma de preguntar ("qué significa", "por qué").
    - `vocabulary.py` son solo las listas de palabras; ahí se agregan
      sinónimos.
 
@@ -504,12 +512,14 @@ servidores Flask.
    de las versiones con un hash de la pregunta, así que la misma pregunta
    recibe siempre la misma frase.
    - [src/llm/glossary.py](../src/llm/glossary.py): qué quieren decir
-     "medido", "simulado" y "estimado". `WELCOME` (línea 94) es la
-     bienvenida; `DEFINITIONS` (línea 29) y `SPACE_STATUS` (línea 70) son las
-     respuestas a "¿qué significa estimado?" y "¿por qué el 3201 sale
-     estimado?". Los datos que citan (salones con sensor, fechas, error
-     típico) los junta [src/api/origins.py](../src/api/origins.py):
-     `facts` (línea 28) y `space_status` (línea 54).
+     "medido", "simulado" y "estimado". `WELCOME` (línea 163) es la
+     bienvenida; `DEFINITIONS` (línea 37) y `SPACE_STATUS` (línea 93) son los
+     hechos de "¿qué significa estimado?" y "¿por qué el 3201 sale
+     estimado?"; `SYSTEM_PROMPT` (línea 134), las reglas y los ejemplos para
+     Llama, y `grounded` (línea 239), la revisión de lo que escribió. Los
+     datos que citan los hechos (salones con sensor, fechas, error típico)
+     los junta [src/api/origins.py](../src/api/origins.py): `facts` (línea
+     28) y `space_status` (línea 54).
 
 8. **[src/llm/llm_client.py](../src/llm/llm_client.py).** El POST a Ollama
    (`generate_answer`, línea 56) y la revisión de que esté encendido
@@ -543,7 +553,7 @@ servidores Flask.
 5. Cuando llegue la base de datos del Tec, ¿qué función cambias?
 
 Respuestas: 1) "No puedo responder ahora mismo." seguido de la razón; se
-decide en `chat`, en el `except RuntimeError` (línea 461 de `api.py`). 2)
+decide en `chat`, en el `except RuntimeError` (línea 513 de `api.py`). 2)
 Porque las palabras de edificio se buscan como palabras completas, con
 `_contains_word`. 3) `llm/vocabulary.py`: se agrega a
 `VARIABLE_SYNONYMS["temperature"]`. 4) El código: `formatting.trend`. 5)

@@ -24,7 +24,7 @@ Author:
 
 Last modified:
     2026-11-27 - The welcome of the chat, and answers to what the labels
-    "medido", "simulado" and "estimado" mean.
+    "medido", "simulado" and "estimado" mean, written by Llama and checked.
 
 Reference:
     Sections 4.3.1 to 4.3.4 of the research document.
@@ -238,12 +238,13 @@ def _target_and_data(
     """Decide what the answer is about, and fetch it.
 
     Order of precedence: a question about what a label means, a space named
-    in the text, an unknown room number, a floor, the whole building. Several
-    outcomes need no LLM at all and come back as a "direct" sentence: what a
-    label means, a space with neither a sensor nor an estimate, an unknown
-    room, no data for the moment asked about, an anomaly question about a
-    generated value, a message that is not a question about the building, or
-    a question that does not say where.
+    in the text, an unknown room number, a floor, the whole building. A
+    question about a label comes back as "explain", for Llama to word and the
+    code to check. Several outcomes need no LLM at all and come back as a
+    "direct" sentence: a space with neither a sensor nor an estimate, an
+    unknown room, no data for the moment asked about, an anomaly question
+    about a generated value, a message that is not a question about the
+    building, or a question that does not say where.
 
     Args:
         intent: The classified question, from _resolve().
@@ -259,11 +260,7 @@ def _target_and_data(
     space = intent.space_id
 
     if intent.terms:
-        # "¿por qué el 3201 sale estimado?": the definition, and what that
-        # space gets, when the question names one.
-        status, values = origins.space_status(space) if space is not None else (None, {})
-        text = glossary.explain(intent.terms, origins.facts(), status, **values)
-        return None, None, {"direct": text}
+        return None, None, _glossary_data(intent, space)
 
     if space is not None:
         measured = not ret.space_rows(space).empty
@@ -293,6 +290,57 @@ def _target_and_data(
     # A building question that does not say where. Answering about a default
     # space would report on a room the user never asked about.
     return None, None, {"direct": replies.reply("ask_target", question)}
+
+
+def _glossary_data(intent: classifier.Intent, space: int | None) -> dict:
+    """The facts and prompts for a question about what a label means.
+
+    Args:
+        intent: The classified question, with its terms.
+        space: The space it names, or None.
+
+    Returns:
+        {"direct": the facts, which are the answer if Llama cannot be used,
+         "explain": the prompts for Llama, the facts to check its answer
+         against and the line the code adds after it}.
+    """
+    facts = origins.facts()
+    # "¿por qué el 3201 sale estimado?": the definition, and what that space
+    # gets, when the question names one.
+    status, values = origins.space_status(space) if space is not None else (None, {})
+    facts_text = glossary.explain(intent.terms, facts, status, **values)
+    system, user = glossary.prompt(intent.original_text, facts_text)
+    return {
+        "direct": facts_text,
+        "explain": {
+            "system": system,
+            "user": user,
+            "facts": facts_text,
+            "note": glossary.note(intent.terms, facts, status),
+        },
+    }
+
+
+def _explained(data: dict) -> str:
+    """Llama's answer about a label, checked; the facts as they are if it fails.
+
+    Args:
+        data: From _glossary_data().
+
+    Returns:
+        Llama's sentences followed by the code's line, or the facts when
+        Ollama is off or Llama wrote a number that is not in them.
+    """
+    explain = data["explain"]
+    try:
+        text = llm_client.generate_answer(explain["system"], explain["user"])
+    except RuntimeError:
+        return data["direct"]
+    if not glossary.grounded(text, explain["facts"]):
+        return data["direct"]
+    if not explain["note"]:
+        return text
+    return f"{text.rstrip()}\n\n{explain['note']}"
 
 
 def _no_data_message(space: int, label: str, question: str) -> str:
@@ -418,7 +466,9 @@ def context_for(question: Question) -> dict:
     intent, at, since, named = _resolve(question.question)
     space, floor, data = _target_and_data(intent, at, since)
     system, user = None, None
-    if not data.get("direct"):
+    if data.get("explain"):
+        system, user = data["explain"]["system"], data["explain"]["user"]
+    elif not data.get("direct"):
         system, user = context.build_prompt(intent, data)
 
     return {
@@ -452,6 +502,8 @@ def chat(question: Question) -> Answer:
     """
     intent, at, since, named = _resolve(question.question)
     space, floor, data = _target_and_data(intent, at, since)
+    if data.get("explain"):
+        return Answer(response=_explained(data), intent_type=intent.kind)
     if data.get("direct"):
         return Answer(response=data["direct"], intent_type=intent.kind, space=space)
 
