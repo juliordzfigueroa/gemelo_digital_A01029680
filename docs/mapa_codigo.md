@@ -114,24 +114,31 @@ Navegador ── index.html + viewer.js ◄── API :8000 (sirve la página y 
 
 7. **[web/index.html](../web/index.html).** La página. Las líneas 16 a 27
    cargan la librería Potree y lo que necesita; la línea 30 es el área donde
-   se dibuja la nube; desde la 34, el panel de la derecha (pisos, chat y el
-   panel oculto de medir salones). Al final carga `viewer.js`.
+   se dibuja la nube; la 34 es el borde que se arrastra para cambiar el
+   ancho del panel, y desde la 36 viene el panel de la derecha (pisos, chat y
+   el panel oculto de medir salones). Al final carga `viewer.js`.
 
 8. **[web/viewer.js](../web/viewer.js).** El cliente, como tu cliente WebGL:
-   - Arriba (líneas 11 a 30): constantes, entre ellas `SURVEY_MODE`, que
-     solo vale verdadero si la dirección termina en `?medir`.
-   - `main` (línea 55): pide `/spaces`, carga los pisos y dibuja marcadores.
-   - `loadFloors` (línea 78): para cada piso revisa que exista su
+   - Arriba (líneas 11 a 55): constantes, entre ellas `SURVEY_MODE`, que
+     solo vale verdadero si la dirección termina en `?medir`, y `state`.
+   - `main` (línea 73): muestra la bienvenida, pide `/spaces`, carga los
+     pisos y dibuja marcadores.
+   - `loadFloors` (línea 97): para cada piso revisa que exista su
      `metadata.json`, lo carga con `Potree.loadPointCloud`, lo agrega a la
      escena y crea su casilla para mostrarlo u ocultarlo.
-   - `showOnlyFloor` / `showAllFloors` (líneas 120 y 129): lo que pasa cuando
+   - `showOnlyFloor` / `showAllFloors` (líneas 139 y 148): lo que pasa cuando
      el chat responde sobre un piso o sobre el edificio.
-   - `drawMarkers` (línea 156): pone una etiqueta por salón con marcador
+   - `drawMarkers` (línea 175): pone una etiqueta por salón con marcador
      (hoy ninguno tiene).
-   - El bloque de la línea 199: el chat. Manda la pregunta a `/chat`, muestra
+   - El bloque de la línea 218: el chat. Manda la pregunta a `/chat`, muestra
      la respuesta y la línea de abajo ("lectura actual • piso 2").
-   - `setupSurvey` (línea 285): el panel de medir salones; solo corre con
+     `showWelcome` (línea 268) pone la bienvenida de `/welcome` al abrir.
+   - `setupSurvey` (línea 321): el panel de medir salones; solo corre con
      `?medir`.
+   - `setupResizer` (línea 392): arrastrar el borde izquierdo del panel
+     cambia su ancho (entre 280 px y el 60% de la ventana; doble clic lo
+     regresa a 360). El ancho se guarda en el navegador. Potree mide su área
+     en cada cuadro, así que la nube se acomoda sola.
 
 ### Preguntas para comprobar
 
