@@ -8,7 +8,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Moved here from classifier.py.
+    2026-11-27 - Words for asking what the labels of an answer mean.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -170,4 +170,40 @@ OUT_OF_SCOPE_WORDS = [
     "quién es", "quien es", "programa", "código", "codigo", "tarea", "ensayo",
     "opinas", "opinión", "opinion", "chatgpt", "noticias", "película",
     "pelicula", "fútbol", "futbol", "hace en",
+]
+
+# --------------------------------------------------------------------------
+# Questions about the labels under an answer
+# --------------------------------------------------------------------------
+# A question that names one of these labels and asks what it means ("¿qué
+# significa que un salón esté estimado?") gets its definition, written by
+# llm/glossary.py. It needs both: "¿cómo está el 3201 estimado?" asks for the
+# estimate, not for a definition. Matched as whole words, even when the
+# question names a space: "¿por qué el 3201 sale estimado?".
+TERM_WORDS = {
+    "medido": ["medido", "medidos"],
+    "simulado": ["simulado", "simulados", "simulada", "simuladas", "simulación", "simulacion"],
+    "estimado": [
+        "estimado", "estimados", "estimada", "estimadas", "estimación",
+        "estimacion", "estimaciones",
+    ],
+    "mixto": ["mixto", "mixtos", "medidos y estimados", "simulados y estimados"],
+    "error": [
+        "error típico", "error tipico", "margen de error", "error", "confiable",
+        "preciso", "precisa", "precisión", "precision",
+    ],
+    "generador": ["generador", "generado", "generados", "generada", "generadas"],
+}
+
+# Asking about every label at once: "¿qué significan las etiquetas?".
+ALL_TERMS_WORDS = ["etiqueta", "etiquetas", "término", "termino", "términos", "terminos"]
+
+# Ways of asking what something means, or why an answer says it.
+MEANING_WORDS = [
+    "significa", "significan", "significado", "quiere decir", "quieren decir",
+    "se refiere", "se refieren", "qué es", "que es", "qué son", "que son",
+    "por qué", "por que", "porque", "diferencia", "explica", "explícame",
+    "explicame", "de dónde sale", "de donde sale", "de dónde salen",
+    "de donde salen", "cómo se calcula", "como se calcula", "qué tan confiable",
+    "que tan confiable", "qué tan preciso", "que tan preciso",
 ]

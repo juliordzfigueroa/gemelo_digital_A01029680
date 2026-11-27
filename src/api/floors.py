@@ -185,8 +185,12 @@ def _summarize(data: dict, kind: str) -> None:
         data["origin"] = "medido"
     elif data["n_measured"]:
         data["origin"] = "mixto"
+    elif len(data["origins"]) == 1:
+        data["origin"] = data["origins"][0]
     else:
-        data["origin"] = data["origins"][0] if len(data["origins"]) == 1 else "mixto"
+        # Nothing measured: the rooms with a sensor are simulated, the rest
+        # estimated. "mixto" would tell the viewer some were measured.
+        data["origin"] = "generado"
 
 
 def _floor_summary(rooms: list[dict], key: str, variables: list[str]) -> dict:

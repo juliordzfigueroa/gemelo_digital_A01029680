@@ -12,9 +12,9 @@ else.
 
 Where each step lives: llm/classifier.py reads the question, api/retrieval.py
 fetches the data, llm/context.py and llm/floor_prompt.py write the prompt,
-llm/llm_client.py talks to Ollama, and llm/replies.py holds every sentence the
-code writes on its own. This file only routes between them and serves the
-viewer.
+llm/llm_client.py talks to Ollama, and llm/replies.py and llm/glossary.py
+hold every sentence the code writes on its own. This file only routes between
+them and serves the viewer.
 
 Usage, from the src/ directory:
     uvicorn api.api:app --port 8000
@@ -23,8 +23,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Answers for any date of the semester, and for rooms without
-    a sensor, from the generator's rows.
+    2026-11-27 - The welcome of the chat, and answers to what the labels
+    "medido", "simulado" and "estimado" mean.
 
 Reference:
     Sections 4.3.1 to 4.3.4 of the research document.
@@ -43,14 +43,14 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from api import floors
+from api import floors, origins
 from api import retrieval as ret
 from api import sources as src
 from common import config as cfg
 from common import data as dat
 from common import spaces
 from gru import predict as pred
-from llm import classifier, context, floor_prompt, llm_client, replies
+from llm import classifier, context, floor_prompt, glossary, llm_client, replies
 from llm import formatting as fmt
 
 
@@ -74,7 +74,7 @@ class Answer(BaseModel):
     horizon_min: int | None = None
     forecast_method: str | None = None
     warning: str | None = None
-    origin: str | None = None  # medido, simulado, estimado or mixto; None for a fixed reply
+    origin: str | None = None  # medido, simulado, estimado, mixto or generado; None for a fixed reply
     moment: str | None = None  # the date and time asked about, when the question named one
 
 
@@ -237,12 +237,13 @@ def _target_and_data(
 ) -> tuple[int | None, int | None, dict]:
     """Decide what the answer is about, and fetch it.
 
-    Order of precedence: a space named in the text, an unknown room number,
-    a floor, the whole building. Several outcomes need no LLM at all and come
-    back as a "direct" sentence: a space with neither a sensor nor an
-    estimate, an unknown room, no data for the moment asked about, an
-    anomaly question about a generated value, a message that is not a
-    question about the building, or a question that does not say where.
+    Order of precedence: a question about what a label means, a space named
+    in the text, an unknown room number, a floor, the whole building. Several
+    outcomes need no LLM at all and come back as a "direct" sentence: what a
+    label means, a space with neither a sensor nor an estimate, an unknown
+    room, no data for the moment asked about, an anomaly question about a
+    generated value, a message that is not a question about the building, or
+    a question that does not say where.
 
     Args:
         intent: The classified question, from _resolve().
@@ -256,6 +257,13 @@ def _target_and_data(
     """
     question = intent.original_text
     space = intent.space_id
+
+    if intent.terms:
+        # "¿por qué el 3201 sale estimado?": the definition, and what that
+        # space gets, when the question names one.
+        status, values = origins.space_status(space) if space is not None else (None, {})
+        text = glossary.explain(intent.terms, origins.facts(), status, **values)
+        return None, None, {"direct": text}
 
     if space is not None:
         measured = not ret.space_rows(space).empty
@@ -291,11 +299,11 @@ def _no_data_message(space: int, label: str, question: str) -> str:
     """Say there is nothing for that moment, and which dates there are for that space."""
     measured = ret.space_rows(space)[cfg.TIME_COLUMN]
     generated = src.generated_rows(space)
-    measured_span = f"del {measured.min():%d/%m} al {measured.max():%d/%m}" if len(measured) else "nada"
+    measured_span = fmt.date_span(measured.min(), measured.max()) if len(measured) else "nada"
     generated_span = "nada"
     if not generated.empty:
         times = generated[cfg.TIME_COLUMN]
-        generated_span = f"del {times.min():%d/%m} al {times.max():%d/%m}"
+        generated_span = fmt.date_span(times.min(), times.max())
     return replies.reply(
         "no_data_moment", question, of_subject=replies.of_label(label),
         measured=measured_span, generated=generated_span,
@@ -382,6 +390,17 @@ def get_registry() -> dict:
     return spaces.read()
 
 
+@app.get("/welcome")
+def welcome() -> dict:
+    """Return the first message of the chat, which the viewer shows when it opens.
+
+    Returns:
+        {"response": what the assistant answers and what the labels under an
+        answer mean, with the rooms and dates of the data loaded}.
+    """
+    return {"response": glossary.welcome(origins.facts())}
+
+
 @app.post("/context")
 def context_for(question: Question) -> dict:
     """Run the chain up to the prompt, without calling the LLM.
@@ -410,6 +429,7 @@ def context_for(question: Question) -> dict:
             "floor": floor,
             "building": data.get("scope") == "building",
             "chat": intent.chat,
+            "terms": intent.terms,
             "horizon_min": intent.horizon_min,
             "moment": str(at) if named else None,
         },

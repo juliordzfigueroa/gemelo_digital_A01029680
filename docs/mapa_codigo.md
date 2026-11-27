@@ -417,7 +417,8 @@ misma pregunta siempre siga el mismo camino.
 
 **Respuestas directas.** Cuando no hay datos que redactar (un saludo, algo
 fuera de tema, un salón que no existe o que no tiene sensor, una pregunta que
-no dice dónde), el código contesta con frases fijas y Llama ni se entera.
+no dice dónde, "¿qué significa estimado?"), el código contesta con frases
+fijas y Llama ni se entera. La bienvenida del chat también es del código.
 
 **Dos prompts.** El de sistema son las reglas fijas (máximo 3 oraciones, solo
 los datos recibidos, con unidades). El de usuario lleva la pregunta y los
@@ -437,7 +438,7 @@ servidores Flask.
 "¿Cómo va a estar el piso 3 en una hora?"
    │
    ├─ classifier.classify          tipo forecast, piso 3, horizonte 60 min
-   ├─ api._target_and_data         ¿salón? ¿número desconocido? ¿piso? ¿edificio? ¿charla?
+   ├─ api._target_and_data         ¿qué significa? ¿salón? ¿número desconocido? ¿piso? ¿edificio? ¿charla?
    ├─ retrieval.floor_data         GRU salón por salón, más promedio, mínimo y máximo
    ├─ context.build_prompt         como es un piso, lo escribe floor_prompt.prompt
    ├─ llm_client.generate_answer   Llama escribe una o dos oraciones
@@ -453,18 +454,23 @@ servidores Flask.
    - `_moment` (línea 145): el momento de la pregunta: la última lectura, o
      la fecha y hora que nombra. `_named_day` (línea 181) decide qué martes
      es "el martes", según el tiempo del verbo.
-   - `_target_and_data` (línea 235): el ruteo. Lee los `if` en orden: salón,
-     número desconocido, piso, edificio, charla, y al final "¿de qué salón?".
-   - `chat` (línea 423): la cadena completa de una pregunta.
+   - `_target_and_data` (línea 235): el ruteo. Lee los `if` en orden: qué
+     significa una etiqueta, salón, número desconocido, piso, edificio,
+     charla, y al final "¿de qué salón?".
+   - `welcome` (línea 394): la ruta `/welcome`, el primer mensaje del chat.
+   - `chat` (línea 443): la cadena completa de una pregunta.
 
 2. **[src/llm/classifier.py](../src/llm/classifier.py)** y
    **[src/llm/vocabulary.py](../src/llm/vocabulary.py).**
-   - `classify` (línea 92): junta todo en un `Intent`.
-   - `_detect_kind` (línea 175): la prioridad anomalía > pronóstico > historial
+   - `classify` (línea 120): junta todo en un `Intent`.
+   - `_detect_kind` (línea 233): la prioridad anomalía > pronóstico > historial
      > actual.
-   - `_extract_space`, `_extract_floor` y `_extract_horizon` (líneas 241, 256
-     y 310): el salón, el piso y los minutos.
-   - `_detect_chat` (línea 140): saludo, agradecimiento o fuera de tema.
+   - `_extract_space`, `_extract_floor` y `_extract_horizon` (líneas 299, 314
+     y 469): el salón, el piso y los minutos.
+   - `_detect_chat` (línea 198): saludo, agradecimiento o fuera de tema.
+   - `_extract_terms` (línea 174): qué etiqueta pregunta qué significa
+     ("estimado", "simulado"…). Necesita la etiqueta y una forma de preguntar
+     ("qué significa", "por qué").
    - `vocabulary.py` son solo las listas de palabras; ahí se agregan
      sinónimos.
 
@@ -477,7 +483,7 @@ servidores Flask.
    - `current_data`, `history_data`, `anomaly_data` y `forecast_data`
      (líneas 167, 192, 236 y 297): un salón en un momento.
    - [src/api/floors.py](../src/api/floors.py): `floor_data` (línea 35), un
-     piso o el edificio; `_floor_summary` (línea 192) calcula el promedio y
+     piso o el edificio; `_floor_summary` (línea 196) calcula el promedio y
      los extremos.
 
 4. **[src/llm/context.py](../src/llm/context.py).** Los prompts de un salón.
@@ -485,17 +491,25 @@ servidores Flask.
    qué prompt armar.
 
 5. **[src/llm/floor_prompt.py](../src/llm/floor_prompt.py).** El prompt de un
-   piso (`prompt`, línea 59) y el detalle por salón (`detail`, línea 227).
+   piso (`prompt`, línea 60) y el detalle por salón (`detail`, línea 234).
 
 6. **[src/llm/formatting.py](../src/llm/formatting.py).** Cómo se escriben los
    números. `threshold_notes` (línea 129) pone las etiquetas "ALTO" o "por
-   encima del rango de confort"; `trend` (línea 202) escribe "sube 62.8 ppm";
-   `anomaly` escribe cada anomalía que encontró el detector.
+   encima del rango de confort"; `trend` (línea 247) escribe "sube 62.8 ppm";
+   `date_span` (línea 191) escribe "del 2 al 11 de octubre"; `anomaly` escribe
+   cada anomalía que encontró el detector.
 
 7. **[src/llm/replies.py](../src/llm/replies.py).** Las frases fijas.
-   `TEMPLATES` (línea 38) trae las plantillas; `reply` (línea 91) escoge una
+   `TEMPLATES` (línea 37) trae las plantillas; `reply` (línea 113) escoge una
    de las versiones con un hash de la pregunta, así que la misma pregunta
    recibe siempre la misma frase.
+   - [src/llm/glossary.py](../src/llm/glossary.py): qué quieren decir
+     "medido", "simulado" y "estimado". `WELCOME` (línea 94) es la
+     bienvenida; `DEFINITIONS` (línea 29) y `SPACE_STATUS` (línea 70) son las
+     respuestas a "¿qué significa estimado?" y "¿por qué el 3201 sale
+     estimado?". Los datos que citan (salones con sensor, fechas, error
+     típico) los junta [src/api/origins.py](../src/api/origins.py):
+     `facts` (línea 28) y `space_status` (línea 54).
 
 8. **[src/llm/llm_client.py](../src/llm/llm_client.py).** El POST a Ollama
    (`generate_answer`, línea 56) y la revisión de que esté encendido
@@ -529,7 +543,7 @@ servidores Flask.
 5. Cuando llegue la base de datos del Tec, ¿qué función cambias?
 
 Respuestas: 1) "No puedo responder ahora mismo." seguido de la razón; se
-decide en `chat`, en el `except RuntimeError` (línea 441 de `api.py`). 2)
+decide en `chat`, en el `except RuntimeError` (línea 461 de `api.py`). 2)
 Porque las palabras de edificio se buscan como palabras completas, con
 `_contains_word`. 3) `llm/vocabulary.py`: se agrega a
 `VARIABLE_SYNONYMS["temperature"]`. 4) El código: `formatting.trend`. 5)

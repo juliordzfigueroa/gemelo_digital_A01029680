@@ -10,7 +10,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Moved here from context.py; added the anomaly lines.
+    2026-11-27 - Periods of days written in words.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -180,6 +180,31 @@ def expected_error(error: dict | None) -> str:
             decimals = 0 if variable == "co2" else 1
             parts.append(f"{VARIABLE_NAMES[variable]} ±{error[variable]:.{decimals}f} {short_unit(variable)}".rstrip())
     return ", ".join(parts)
+
+
+MONTH_NAMES = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+    "septiembre", "octubre", "noviembre", "diciembre",
+)
+
+
+def date_span(first: object, last: object) -> str:
+    """Write a period of days the way a person says it.
+
+    Args:
+        first: First moment of the period (a timestamp or a date).
+        last: Last moment of the period.
+
+    Returns:
+        "del 2 al 11 de octubre"; "del 14 de septiembre al 6 de diciembre"
+        when the months differ; "el 2 de octubre" for a single day.
+    """
+    end = f"{last.day} de {MONTH_NAMES[last.month - 1]}"
+    if (first.month, first.day) == (last.month, last.day):
+        return f"el {end}"
+    if first.month == last.month:
+        return f"del {first.day} al {end}"
+    return f"del {first.day} de {MONTH_NAMES[first.month - 1]} al {end}"
 
 
 def anomaly(item: dict) -> str:

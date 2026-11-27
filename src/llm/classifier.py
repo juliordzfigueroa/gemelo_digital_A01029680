@@ -17,8 +17,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Reads the date, the weekday, the relative day and the time
-    a question asks about.
+    2026-11-27 - Reads which labels of an answer a question asks the
+    meaning of.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -93,6 +93,9 @@ class Intent:
         day_offset: Days from the present it names ("ayer" is -1), or None.
         at_time: The time of day it asks about ("a las 10", "en la tarde"),
             or None.
+        terms: Labels of an answer it asks the meaning of ("¿qué significa
+            estimado?"), as keys of vocabulary.TERM_WORDS. Empty for a
+            question about the building.
         original_text: The question as the user typed it, so the prompt can
             quote it back verbatim.
     """
@@ -110,6 +113,7 @@ class Intent:
     week: str | None = None
     day_offset: int | None = None
     at_time: time | None = None
+    terms: list[str] = field(default_factory=list)
     original_text: str = ""
 
 
@@ -162,8 +166,33 @@ def classify(question: str) -> Intent:
         week=_extract_week(text),
         day_offset=_extract_day_offset(text),
         at_time=_extract_time(text),
+        terms=_extract_terms(text),
         original_text=question,
     )
+
+
+def _extract_terms(text: str) -> list[str]:
+    """Find the labels of an answer the question asks the meaning of.
+
+    It needs a label ("estimado") and a way of asking what it means ("qué
+    significa", "por qué"): "¿cómo está el 3201 estimado?" asks for the
+    estimate, not for a definition.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        Keys of vocabulary.TERM_WORDS, in that order, or an empty list.
+    """
+    if not _contains_word(text, voc.MEANING_WORDS):
+        return []
+    if _contains_word(text, voc.ALL_TERMS_WORDS):
+        return ["medido", "simulado", "estimado"]
+    terms = [term for term, words in voc.TERM_WORDS.items() if _contains_word(text, words)]
+    # "medidos y estimados" is one label, not "medido" plus "estimado".
+    if "mixto" in terms:
+        terms = [t for t in terms if t not in ("medido", "simulado", "estimado")]
+    return terms
 
 
 def _detect_chat(text: str, variables: list[str]) -> str | None:

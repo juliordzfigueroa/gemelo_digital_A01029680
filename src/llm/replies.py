@@ -19,7 +19,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Sentences for estimated rooms, from the generator.
+    2026-11-27 - The greeting names the semester and the estimates.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -38,12 +38,14 @@ TEMPLATES: dict[str, tuple[str, ...]] = {
     "help": (
         "¡Hola! Soy el asistente del gemelo digital de Aulas 3. Te puedo contar "
         "cómo están el CO₂, la temperatura, la humedad, la luz y el movimiento en "
-        "los salones, qué se espera en las próximas dos horas y cómo han estado en "
-        f"el último día. Prueba con {EXAMPLES}.",
+        "los salones, cómo estuvieron algún día del semestre y qué se espera en "
+        f"las próximas dos horas. Prueba con {EXAMPLES}. Si debajo de una "
+        "respuesta ves «estimado» o «simulado», pregúntame qué significa.",
         "Hola, aquí el asistente del gemelo digital de Aulas 3. Mi trabajo es "
         "contarte cómo está el ambiente del edificio: lecturas de los sensores, "
-        "pronósticos de hasta dos horas e historial del último día, por salón, por "
-        f"piso o de todo el edificio. Puedes empezar con {EXAMPLES}.",
+        "estimaciones de los salones sin sensor, pronósticos de hasta dos horas e "
+        "historial de cualquier día del semestre, por salón, por piso o de todo el "
+        f"edificio. Puedes empezar con {EXAMPLES}.",
     ),
     "thanks": (
         "¡Con gusto! Si quieres saber algo más del edificio, aquí sigo.",

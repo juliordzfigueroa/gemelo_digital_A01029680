@@ -20,15 +20,18 @@ const SURVEY_KEY = "aulas3-survey";
 // building, not for the people asking questions. It only appears when the
 // page is opened with ?medir in the address.
 const SURVEY_MODE = new URLSearchParams(location.search).has("medir");
-// The API names question types in English (code identifiers); the person
-// reading the chat sees them in Spanish.
 // Where the values of an answer come from, when they are not readings.
+// /welcome explains them, and so does a question like "¿qué significa
+// estimado?".
 const ORIGIN_LABELS = {
 	estimado: "estimado, sin sensor",
 	simulado: "simulado, el sensor no midió",
 	mixto: "medidos y estimados",
+	generado: "simulados y estimados",
 };
 
+// The API names question types in English (code identifiers); the person
+// reading the chat sees them in Spanish.
 const INTENT_LABELS = {
 	current: "lectura actual",
 	forecast: "pronóstico",
@@ -60,6 +63,7 @@ viewer.loadGUI(() => {
 main();
 
 async function main() {
+	showWelcome();
 	let registry;
 	try {
 		registry = await (await fetch("/spaces")).json();
@@ -249,6 +253,18 @@ $id("question").addEventListener("keydown", (event) => {
 		$id("ask").requestSubmit();
 	}
 });
+
+// The first message of the chat: what the assistant answers and what the
+// labels under an answer mean. The API writes it, with the rooms and dates
+// of the data it has.
+async function showWelcome() {
+	try {
+		const r = await fetch("/welcome");
+		if (r.ok) addMessage("bot", (await r.json()).response);
+	} catch (e) {
+		// The chat works without it.
+	}
+}
 
 function addMessage(kind, text) {
 	const div = document.createElement("div");
