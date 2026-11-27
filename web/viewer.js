@@ -16,10 +16,26 @@ const LABELS = {
 	motion: ["Movimiento", ""],
 };
 const SURVEY_KEY = "aulas3-survey";
+// The panel's width, dragged from its left edge, is kept in the browser so
+// the panel opens as it was left. Between PANEL_MIN and 60% of the window,
+// so neither the panel nor the scene disappears.
+const PANEL_KEY = "aulas3-panel-width";
+const PANEL_DEFAULT = 360;
+const PANEL_MIN = 280;
 // The survey panel (markers and room sizes) is a tool for whoever maps the
 // building, not for the people asking questions. It only appears when the
 // page is opened with ?medir in the address.
 const SURVEY_MODE = new URLSearchParams(location.search).has("medir");
+// Where the values of an answer come from, when they are not readings.
+// /welcome explains them, and so does a question like "¿qué significa
+// estimado?".
+const ORIGIN_LABELS = {
+	estimado: "estimado, sin sensor",
+	simulado: "simulado, el sensor no midió",
+	mixto: "medidos y estimados",
+	generado: "simulados y estimados",
+};
+
 // The API names question types in English (code identifiers); the person
 // reading the chat sees them in Spanish.
 const INTENT_LABELS = {
@@ -35,6 +51,7 @@ const state = {
 	annotations: {},     // space_id -> Annotation
 	selected: null,
 	survey: loadSurvey(), // space_id -> {marker, dimensions}, kept until downloaded
+	panelWidth: PANEL_DEFAULT, // px, set by setPanelWidth()
 };
 
 const $id = (id) => document.getElementById(id);
@@ -50,9 +67,11 @@ viewer.loadGUI(() => {
 	$("#menu_tools").next().show();
 });
 
+setupResizer();
 main();
 
 async function main() {
+	showWelcome();
 	let registry;
 	try {
 		registry = await (await fetch("/spaces")).json();
@@ -223,6 +242,8 @@ $id("ask").addEventListener("submit", async (event) => {
 		if (about !== null && about !== undefined) {
 			const kind = INTENT_LABELS[answer.intent_type] ?? answer.intent_type;
 			appendSpan(pending, "meta", `${kind} • ${about}`
+				+ (answer.moment ? ` • ${answer.moment.slice(0, 16)}` : "")
+				+ (ORIGIN_LABELS[answer.origin] ? ` • ${ORIGIN_LABELS[answer.origin]}` : "")
 				+ (answer.forecast_method ? ` • ${answer.forecast_method}, ${answer.horizon_min} min` : ""));
 		}
 		if (answer.warning) appendSpan(pending, "warning", answer.warning);
@@ -240,6 +261,21 @@ $id("question").addEventListener("keydown", (event) => {
 		$id("ask").requestSubmit();
 	}
 });
+
+// The first message of the chat: what the assistant answers and what the
+// labels under an answer mean. The API writes it, with the rooms and dates
+// of the data it has.
+async function showWelcome() {
+	try {
+		const r = await fetch("/welcome");
+		if (!r.ok) return;
+		addMessage("bot", (await r.json()).response);
+		// Read from its first line, not scrolled to its end like an answer.
+		$id("messages").scrollTop = 0;
+	} catch (e) {
+		// The chat works without it.
+	}
+}
 
 function addMessage(kind, text) {
 	const div = document.createElement("div");
@@ -348,6 +384,49 @@ function updateSurveyCount() {
 }
 
 // Measurements survive a page reload until they are written to spaces.json.
+// --------------------------------------------------------------------------
+// Panel width
+// --------------------------------------------------------------------------
+// Potree reads the size of its area on every frame, so the scene follows the
+// new width with nothing else to do.
+function setupResizer() {
+	const handle = $id("resizer");
+	setPanelWidth(loadPanelWidth());
+	handle.addEventListener("pointerdown", (event) => {
+		// The pointer stays with the handle even over the scene, which
+		// would otherwise take the drag as a camera move.
+		handle.setPointerCapture(event.pointerId);
+		document.body.classList.add("resizing");
+	});
+	handle.addEventListener("pointermove", (event) => {
+		if (handle.hasPointerCapture(event.pointerId)) {
+			setPanelWidth(window.innerWidth - event.clientX);
+		}
+	});
+	handle.addEventListener("lostpointercapture", () => {
+		document.body.classList.remove("resizing");
+		savePanelWidth();
+	});
+	handle.addEventListener("dblclick", () => {
+		setPanelWidth(PANEL_DEFAULT);
+		savePanelWidth();
+	});
+}
+
+function setPanelWidth(width) {
+	const limited = Math.max(PANEL_MIN, Math.min(width, window.innerWidth * 0.6));
+	state.panelWidth = Math.round(limited);
+	document.documentElement.style.setProperty("--panel-width", `${state.panelWidth}px`);
+}
+
+function loadPanelWidth() {
+	try { return Number(localStorage.getItem(PANEL_KEY)) || PANEL_DEFAULT; } catch { return PANEL_DEFAULT; }
+}
+
+function savePanelWidth() {
+	try { localStorage.setItem(PANEL_KEY, String(state.panelWidth)); } catch { /* private window */ }
+}
+
 function loadSurvey() {
 	try { return JSON.parse(localStorage.getItem(SURVEY_KEY)) ?? {}; } catch { return {}; }
 }

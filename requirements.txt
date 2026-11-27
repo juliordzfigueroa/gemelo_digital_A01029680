@@ -24,6 +24,11 @@ statsmodels==0.15.0
 pyarrow==25.0.1
 matplotlib==3.11.2
 
+# --- Generador de datos físicos ----------------------------------------------
+# Ajuste de la caída del CO₂ (λ). Ya viene con statsmodels; se declara porque
+# el generador lo importa directamente.
+scipy==1.18.1
+
 # --- Capa conversacional y API ---------------------------------------------
 fastapi==0.143.0
 uvicorn==0.54.0

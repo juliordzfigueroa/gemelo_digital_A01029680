@@ -7,18 +7,26 @@ Llama 3.1 8B servido por Ollama, orquestado por FastAPI.
 
 ## Qué se le puede preguntar
 
-Desde el chat del visor o `POST /chat`. Hay dos familias de respuesta:
+Desde el chat del visor o `POST /chat`. Hay tres familias de respuesta:
 
 - **Respuestas con datos.** Cuatro tipos (lectura actual, pronóstico,
   histórico, anomalía) sobre un objetivo (un salón, un piso o todo el
   edificio). Los números los pone el código; Llama redacta.
+- **Preguntas sobre las etiquetas.** Qué quieren decir "medido", "simulado"
+  y "estimado", o de dónde sale un valor. Llama redacta a partir de hechos
+  fijos de `glossary.py`, y el código revisa lo que escribió.
 - **Respuestas de la herramienta.** Saludos, agradecimientos, preguntas
   fuera de tema, preguntas que no dicen dónde, salones que no existen y
   salones sin sensor. No llevan datos que redactar, así que las contesta el
   código con frases fijas de `replies.py`, sin llamar a Llama.
 
+Al abrir el visor, el chat empieza con una bienvenida (`GET /welcome`): qué
+se le puede preguntar y qué quieren decir "medido", "simulado" y "estimado",
+con los salones que tienen sensor y el error típico tomados de los datos.
+
 ```
-pregunta ─► clasificador ─┬─ ¿nombra salón, piso o edificio? ── sí ─► respuesta con datos (Llama)
+pregunta ─► clasificador ─┬─ ¿pregunta por una etiqueta? ────── sí ─► la explicación (Llama, revisada)
+                          ├─ ¿nombra salón, piso o edificio? ── sí ─► respuesta con datos (Llama)
                           │                                            o "no tiene sensor"
                           └─ no ─┬─ pide algo de un chatbot general ─► fuera de tema
                                  ├─ habla del edificio (variable, ─────► "¿de qué salón o piso?"
@@ -61,8 +69,42 @@ recibe la misma respuesta y una demostración se puede repetir.
 | Fuera de tema (pregunta de chatbot general) | "¿cuál es la capital de Francia?", "escríbeme un poema", "explícame qué es el CO₂", "¿qué opinas de…?" | Que no es un asistente general y qué sí puede responder |
 | Pregunta del edificio sin lugar | "¿cómo está el CO₂?", "¿cómo están los valores?" | "¿De qué salón o piso te gustaría saber?". Nunca responde sobre un salón por omisión |
 | Salón que no existe | "3310", "2905" | Que no está registrado y qué salones hay en ese piso; o que los salones de Aulas 3 empiezan con 3 |
-| Salón sin sensor | "3309" | Que no tiene sensor y cuáles sí tienen datos |
-| Alias | "3302" | Que corresponde al 3301 (el 3302 no existe físicamente) |
+| Salón sin sensor, de un tipo medido | "3309", "¿cuál fue el máximo de CO₂ del 3301?", "¿cómo va a estar el 3201 en una hora?" | Una **estimación** del generador (lectura, historial o pronóstico), con una nota escrita por el código: que es estimado, de qué salones sale y su error típico. Anomalías no: solo se buscan en lecturas reales |
+| Espacio sin sensor de un tipo nunca medido | "sala de juntas 2" | Que no tiene sensor y cuáles sí tienen datos |
+| Alias | "3302" | Que corresponde al 3301 (el 3302 no existe físicamente), y su estimación |
+### Preguntas sobre las etiquetas
+
+| Caso | Ejemplo | Respuesta |
+|---|---|---|
+| Qué significa una etiqueta | "¿qué significa que un salón esté estimado?", "¿qué pasa si un salón está estimado?", "¿qué diferencia hay entre simulado y estimado?", "¿qué es el GRU?", "¿le puedo creer a lo estimado?" | Qué quiere decir y de dónde sale el valor: el sensor, el generador físico o el GRU |
+| Por qué un salón lleva una etiqueta | "¿por qué el 3201 sale estimado?", "¿por qué el 3308 dice simulado?" | Qué le toca a ese salón (sensor propio, sensor con pocos datos, sin sensor, tipo nunca medido) y de qué salones sale |
+
+**Cuándo es una de estas preguntas.** Si trae una etiqueta ("estimado",
+"simulado", "medido", "medidos y estimados", "generador", "GRU") y no nombra
+lugar ni pide datos, solo puede ser sobre la etiqueta: "salones estimados",
+"no entiendo lo de simulado". Si nombra un salón o pide datos, además tiene
+que preguntar qué es ("qué significa", "por qué", "qué pasa", "no entiendo",
+"de dónde viene"): "¿cómo está el 3201 estimado?" sigue siendo una lectura, y
+"¿cuál fue el CO₂ medido ayer?", una pregunta sin lugar. Una letra de más o
+de menos en las palabras largas se perdona ("esimado").
+
+**Cómo se responde.** El código junta los hechos: la definición de cada
+etiqueta y, si nombra un salón, lo que le toca a ese salón, con sus fechas y
+los salones de los que sale. Llama los cuenta en dos o tres oraciones, de
+tú; el prompt trae dos ejemplos de respuesta, porque a un modelo de 8B le
+enseñan el tono mejor que las reglas. Después el código revisa:
+
+- que cada número que escribió esté en los hechos (así se rechazó "si un
+  piso tiene 10 salones medidos y 5 estimados", que inventó);
+- que no califique ni dé causas que los hechos no dan ("no es confiable",
+  "el sensor no está funcionando");
+- que no empiece con un sí o un no ("No, no es una lectura" se lee como "no
+  le creas").
+
+Si pasa, se le agrega una línea del código: que lo simulado y lo estimado
+salen del generador físico y no del GRU, y su error típico. Si no pasa, o
+Ollama está apagado, la respuesta son los hechos tal cual, que están
+escritos para leerse.
 
 Si el texto nombra un salón y un piso ("el 3308 del piso 3"), gana el salón.
 El lugar sale siempre del texto: la petición solo lleva la pregunta.
@@ -77,10 +119,48 @@ agradecimiento o fuera de tema. Las frases genéricas ("cuál es", "hoy") no
 cuentan como palabras del edificio, porque también las tiene "¿cuál es la
 capital de Francia?".
 
+### Preguntas por una fecha
+
+Una pregunta puede nombrar un momento del semestre (del 14 de septiembre al 6
+de diciembre) de varias formas, que se pueden combinar:
+
+| Forma | Ejemplos |
+|---|---|
+| Fecha | "el 3 de noviembre", "el 10 de nov" |
+| Día de la semana | "el martes", "el martes pasado", "el próximo jueves", "el jueves que viene" |
+| Día contado desde hoy | "hoy", "ayer", "anteayer", "mañana", "pasado mañana" |
+| Hora | "a las 10", "a las 10:30", "a las 5 de la tarde" |
+| Parte del día | "en la mañana" (10:00), "al mediodía", "en la tarde" (16:00), "en la noche" (20:00) |
+
+**Qué martes es "el martes":** lo decide el tiempo del verbo. En pasado o en
+presente ("¿cómo estuvo el martes?") es el martes más reciente, hoy incluido; en
+futuro ("¿cómo estará el martes?"), el siguiente. "Pasado" y "próximo" mandan
+sobre el verbo. Todo se cuenta desde el "ahora" (la última lectura medida), y
+la respuesta muestra la fecha que usó, así que una confusión se ve.
+
+Sin hora se toma el mediodía, salvo hoy, que es ahora; en una pregunta de
+historial, el día completo. Una pregunta de pronóstico con fecha se responde
+con el estado de ese momento, y el visor la marca como lectura. Sin fecha, todo
+sigue como antes.
+
+Cada respuesta tiene un solo origen, que el código decide (`api/sources.py`)
+y escribe en el prompt, en una nota debajo de la respuesta y en el visor:
+
+| Origen | Cuándo |
+|---|---|
+| medido | El sensor midió ese momento (o ese periodo) |
+| simulado | El salón tiene sensor, pero no midió ese momento: generador con sus propios parámetros |
+| estimado | El salón no tiene sensor, o tiene uno sin datos suficientes (3304): generador con los parámetros de su tipo |
+
+En un piso o en el edificio, cada salón lleva su marca: "3201 (estimado)".
+Fuera del semestre, o en un espacio que el generador no estima, el chat dice
+de qué fechas sí hay datos. Todo sale de `data/processed/generated.parquet`,
+que escribe `python -m generator.generate`.
+
 **Lo que todavía no puede:** recordar la pregunta anterior ("¿y en una
-hora?"), comparar dos salones, fechas u horas concretas ("el martes a las
-10"), más de una variable en el histórico, detectar sensores atascados, y
-datos en vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
+hora?"), comparar dos salones, rangos de días ("toda la semana"), más de una
+variable en el histórico, detectar sensores atascados, y datos en
+vivo: "ahora" es la última lectura del archivo limpio. Hay datos de 3206,
 3208, 3304 (sin CO₂ casi siempre), 3305, 3308 y la oficina de mentores del piso 4
 (solo 2 lecturas, del 2 de octubre).
 
@@ -107,7 +187,9 @@ Una pregunta recorre cuatro pasos y cada uno tiene un dueño distinto:
 ```
 llm/classifier.py     decide de qué tipo es la pregunta y de dónde   (reglas, sin LLM)
 llm/vocabulary.py       las palabras que busca el clasificador
-api/retrieval.py      recupera los datos que ese tipo pide           (GRU, datos, detector)
+api/retrieval.py      recupera los datos de un salón en un momento    (GRU, datos, detector)
+api/floors.py           lo mismo para un piso o el edificio
+api/sources.py          decide el origen: el sensor, o el generador
 llm/context.py        arma el prompt de un salón                     (plantillas)
 llm/floor_prompt.py   arma el prompt de un piso o del edificio,
                         y escribe el detalle por salón

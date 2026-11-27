@@ -17,8 +17,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Word lists moved to vocabulary.py; removed the list of
-    present-state words, which could not change the result.
+    2026-11-27 - Reads which labels of an answer a question asks the
+    meaning of.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -26,9 +26,11 @@ Reference:
 
 from __future__ import annotations
 
+import difflib
 import math
 import re
 from dataclasses import dataclass, field
+from datetime import date, time
 
 from common import config as cfg
 from common import spaces
@@ -54,6 +56,15 @@ ROOM_NUMBER = re.compile(r"\b(\d{4})\b")
 # Horizon when a forecast question names none: one direct pass of the GRU.
 DEFAULT_HORIZON = 30
 
+# A date without a year is in the semester's year.
+YEAR = int(cfg.SEMESTER_START[:4])
+
+# "3 de noviembre", "10 de nov".
+DAY_OF_MONTH = re.compile(rf"\b(\d{{1,2}})\s+de\s+({'|'.join(voc.MONTHS)})\b")
+
+# "a las 10", "a las 10:30", "a la 1". The minutes are optional.
+CLOCK_TIME = re.compile(r"\ba\s+las?\s+(\d{1,2})(?::(\d{2}))?\b")
+
 
 @dataclass
 class Intent:
@@ -74,6 +85,18 @@ class Intent:
             "out_of_scope" (something a general chatbot would answer, or
             nothing recognizable at all). None for building questions.
         horizon_min: Minutes ahead, meaningful only when kind is "forecast".
+        on_day: The date the question asks about ("el 3 de noviembre"), or
+            None for the present.
+        weekday: A day of the week it names ("el martes"), Monday being 0,
+            or None. Which week is decided by api._moment.
+        week: "last" ("el martes pasado"), "next" ("el próximo martes") or
+            None, when the question says which week.
+        day_offset: Days from the present it names ("ayer" is -1), or None.
+        at_time: The time of day it asks about ("a las 10", "en la tarde"),
+            or None.
+        terms: Labels of an answer it asks the meaning of ("¿qué significa
+            estimado?"), as keys of vocabulary.TERM_WORDS. Empty for a
+            question about the building.
         original_text: The question as the user typed it, so the prompt can
             quote it back verbatim.
     """
@@ -86,6 +109,12 @@ class Intent:
     unknown_room: str | None = None
     chat: str | None = None
     horizon_min: int = DEFAULT_HORIZON
+    on_day: date | None = None
+    weekday: int | None = None
+    week: str | None = None
+    day_offset: int | None = None
+    at_time: time | None = None
+    terms: list[str] = field(default_factory=list)
     original_text: str = ""
 
 
@@ -117,8 +146,9 @@ def classify(question: str) -> Intent:
         if floor is None:
             building = _contains_word(text, voc.BUILDING_WORDS)
 
-    has_target = space_id is not None or floor is not None or building or unknown_room
+    has_target = bool(space_id is not None or floor is not None or building or unknown_room)
     chat = None if has_target else _detect_chat(text, variables)
+    asks_for_data = _asks_for_data(text, variables)
 
     horizon = DEFAULT_HORIZON
     if kind == "forecast":
@@ -133,7 +163,89 @@ def classify(question: str) -> Intent:
         unknown_room=unknown_room,
         chat=chat,
         horizon_min=horizon,
+        on_day=_extract_day(text),
+        weekday=_extract_weekday(text),
+        week=_extract_week(text),
+        day_offset=_extract_day_offset(text),
+        at_time=_extract_time(text),
+        terms=_extract_terms(text, has_target, asks_for_data),
         original_text=question,
+    )
+
+
+def _extract_terms(text: str, has_target: bool, asks_for_data: bool) -> list[str]:
+    """Find the labels of an answer the question asks the meaning of.
+
+    A label counts in two cases. When the question asks what it means ("qué
+    significa", "por qué", "no entiendo"), even if it names a space: "¿por
+    qué el 3201 sale estimado?". And when the label is all the question is
+    about, with no place and no data asked for: "¿qué pasa si un salón está
+    estimado?". So "¿cómo está el 3201 estimado?" still asks for the
+    estimate, and "¿cuál fue el CO₂ medido?" for a reading.
+
+    Args:
+        text: The lowercased question.
+        has_target: Whether it names a space, a floor or the building.
+        asks_for_data: From _asks_for_data().
+
+    Returns:
+        Keys of vocabulary.TERM_WORDS, in that order, or an empty list.
+    """
+    asks_meaning = _contains_word(text, voc.MEANING_WORDS)
+    if asks_meaning and _contains_word(text, voc.ALL_TERMS_WORDS):
+        return ["medido", "simulado", "estimado"]
+
+    terms = [term for term, words in voc.TERM_WORDS.items() if _names_term(text, words)]
+    # "medidos y estimados" is one label, not "medido" plus "estimado".
+    if "mixto" in terms:
+        terms = [t for t in terms if t not in ("medido", "simulado", "estimado")]
+
+    if asks_meaning:
+        return terms
+    if not has_target and not asks_for_data and any(t in voc.STANDALONE_TERMS for t in terms):
+        return terms
+    return []
+
+
+def _names_term(text: str, words: list[str]) -> bool:
+    """Test whether the text uses one of the words of a label, allowing one slip.
+
+    A word of six letters or more that is almost one of the long words
+    (similarity of 0.9 or more) counts: "esimado" is "estimado". Shorter
+    words must match exactly, and so do near misses that are other words:
+    "medida" is not "medido", "estimar" is not "estimado".
+
+    Args:
+        text: The lowercased question.
+        words: The words of one label, from vocabulary.TERM_WORDS.
+
+    Returns:
+        True if the label is in the text.
+    """
+    if _contains_word(text, words):
+        return True
+    long_words = [w for w in words if " " not in w and len(w) >= 7]
+    for token in re.findall(r"\w+", text):
+        if len(token) >= 6 and difflib.get_close_matches(token, long_words, n=1, cutoff=0.9):
+            return True
+    return False
+
+
+def _asks_for_data(text: str, variables: list[str]) -> bool:
+    """Test whether a question asks for values: a variable, or a time ahead or behind.
+
+    Args:
+        text: The lowercased question.
+        variables: Variables found in it.
+
+    Returns:
+        True for "¿cómo está el CO₂?" or "¿qué se espera mañana?", False
+        for "¿qué es un salón estimado?".
+    """
+    return bool(
+        variables
+        or _mentions_future(text)
+        or _contains_any(text, voc.ANOMALY_WORDS + voc.FORECAST_WORDS + voc.HISTORY_WORDS)
     )
 
 
@@ -153,12 +265,7 @@ def _detect_chat(text: str, variables: list[str]) -> str | None:
         "help", "thanks", "out_of_scope", or None for a building question
         that only needs to say where.
     """
-    about_building = bool(
-        variables
-        or _mentions_future(text)
-        or _contains_any(text, voc.ANOMALY_WORDS + voc.FORECAST_WORDS + voc.HISTORY_WORDS)
-        or _contains_word(text, voc.DOMAIN_WORDS)
-    )
+    about_building = _asks_for_data(text, variables) or _contains_word(text, voc.DOMAIN_WORDS)
     # Explicit general-chatbot requests win even over building words:
     # "explícame qué es el CO₂" asks for a lesson, not a reading.
     if _contains_word(text, voc.OUT_OF_SCOPE_WORDS):
@@ -287,6 +394,107 @@ def _extract_floor(text: str) -> int | None:
     elif ordinal:
         floor = voc.FLOOR_ORDINALS[ordinal.group(1)]
     return floor if floor in FLOOR_SPACES else None
+
+
+def _extract_day(text: str) -> date | None:
+    """Find the date the question asks about.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        The date, in the semester's year, or None when it names no day or
+        the day does not exist ("31 de noviembre").
+    """
+    found = DAY_OF_MONTH.search(text)
+    if not found:
+        return None
+    try:
+        return date(YEAR, voc.MONTHS[found.group(2)], int(found.group(1)))
+    except ValueError:
+        return None
+
+
+def _extract_time(text: str) -> time | None:
+    """Find the time of day the question asks about.
+
+    The hour is taken as written; "de la tarde" or "pm" after it moves it to
+    the afternoon. "A las 3" stays at 3:00, and the answer shows the time it
+    used, so a misreading is visible.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        The time, or None when it names no hour or the hour does not exist.
+    """
+    found = CLOCK_TIME.search(text)
+    if not found:
+        for phrase, hour in voc.DAY_PARTS.items():
+            if phrase in text:
+                return time(hour, 0)
+        return None
+    hour = int(found.group(1))
+    minute = int(found.group(2) or 0)
+    after = text[found.end() : found.end() + 15]
+    if hour < 12 and any(after.lstrip().startswith(w) for w in voc.AFTERNOON_WORDS):
+        hour += 12
+    if hour > 23 or minute > 59:
+        return None
+    return time(hour, minute)
+
+
+def _extract_weekday(text: str) -> int | None:
+    """Find a day of the week the question names.
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        Monday as 0 to Sunday as 6, or None.
+    """
+    for word, weekday in voc.WEEKDAYS.items():
+        if _contains_word(text, [word]):
+            return weekday
+    return None
+
+
+def _extract_week(text: str) -> str | None:
+    """Find whether the question says which week: "pasado" or "próximo".
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        "last", "next" or None. "Pasado mañana" is a day, not a week.
+    """
+    without_days = text.replace("pasado mañana", "")
+    if _contains_word(without_days, voc.LAST_WEEK_WORDS):
+        return "last"
+    if _contains_word(without_days, voc.NEXT_WEEK_WORDS):
+        return "next"
+    return None
+
+
+def _extract_day_offset(text: str) -> int | None:
+    """Find a day counted from the present: "hoy", "ayer", "mañana".
+
+    Args:
+        text: The lowercased question.
+
+    Returns:
+        Days from the present, or None. "La mañana" (the morning) does not
+        count as tomorrow.
+    """
+    for phrase, offset in voc.RELATIVE_DAYS:
+        if phrase == "mañana":
+            # Only a "mañana" that does not follow "la": "mañana a las 9 de la
+            # mañana" is tomorrow, "a las 9 de la mañana" is today.
+            if re.search(r"(?<!la )\bmañana\b", text):
+                return offset
+        elif _contains_word(text, [phrase]):
+            return offset
+    return None
 
 
 def _extract_unknown_room(text: str) -> str | None:

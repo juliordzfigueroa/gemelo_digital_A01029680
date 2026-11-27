@@ -11,7 +11,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Moved here from context.py; anomaly questions added.
+    2026-11-26 - Generated rooms marked in the prompt and explained at the
+    end of the detail.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -89,6 +90,11 @@ def prompt(intent: Intent, data: dict) -> str:
         return "\n".join(parts)
 
     parts.append(f"{heading}: {len(rooms)} espacios con datos.")
+    if data.get("origins"):
+        parts.append(
+            "Los espacios marcados (estimado) no tienen sensor y los marcados (simulado) "
+            "no midieron ese momento: sus valores son del generador físico, no mediciones."
+        )
     kind = data.get("kind")
     if kind == "anomaly":
         parts += _anomaly_summary(data)
@@ -140,9 +146,10 @@ def _summary_line(variable: str, s: dict) -> str:
 
 def _forecast_summary(data: dict) -> list[str]:
     """Summary block of a floor forecast, with its warning if there is one."""
+    source = "del GRU" if "generador" not in (data.get("method") or "") else "del GRU y del generador"
     lines = [
         "",
-        f"RESUMEN {_of_what(data)}, predicción del GRU a "
+        f"RESUMEN {_of_what(data)}, predicción {source} a "
         f"+{data.get('horizon_min', '?')} min (método {data.get('method', '?')}):",
     ]
     for variable, s in data.get("summary", {}).items():
@@ -247,13 +254,37 @@ def detail(data: dict) -> str:
     for error in data.get("errors", []):
         lines.append(f"• {error['room']}: sin pronóstico ({error['reason']})")
 
+    if data.get("not_checked"):
+        lines.append(f"Sin revisar (solo hay valores del generador): {', '.join(data['not_checked'])}.")
+
+    # With estimates on, a space left out has neither a sensor nor a type to
+    # estimate it from.
+    missing = "sensor ni estimación" if data.get("origins") or data.get("not_checked") else "sensor"
     without = data.get("without_data", [])
     if without and data.get("scope") == "building":
-        lines.append(f"Los otros {len(without)} espacios del edificio no tienen sensor.")
+        lines.append(f"Los otros {len(without)} espacios del edificio no tienen {missing}.")
     elif without:
         _, phrase = scope_names(data)
-        lines.append(f"Sin sensor en {phrase}: {', '.join(without)}.")
+        lines.append(f"Sin {missing} en {phrase}: {', '.join(without)}.")
+
+    for origin in data.get("origins", []):
+        lines.append(_origin_footnote(origin, data["provenance"][origin]))
     return "\n".join(lines)
+
+
+def _origin_footnote(origin: str, provenance: dict) -> str:
+    """The closing line that explains one generated origin of a floor answer."""
+    error = fmt.expected_error(provenance.get("expected_error"))
+    if origin == "estimado":
+        rooms = ", ".join(provenance.get("based_on", []))
+        return (
+            f"(estimado): sin sensor, o con uno sin datos suficientes; del generador físico "
+            f"calibrado con {rooms}. Error típico: {error}."
+        )
+    return (
+        "(simulado): el sensor no midió ese momento; del generador físico con los "
+        f"parámetros de cada salón. Error típico: {error}."
+    )
 
 
 def _room_values(data: dict, room: dict) -> str:

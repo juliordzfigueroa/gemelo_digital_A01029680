@@ -11,6 +11,7 @@ unas preguntas para comprobar que se entendió. Los números de línea son del
 | Capa conversacional | `src/llm/`, `src/api/`, `src/common/spaces.py` | **completa** |
 | Modelo predictivo y su preparación de datos | `src/gru/`, `src/sarimax/`, `src/common/` | **completa** |
 | Ingesta (limpieza, horario, clima) | `src/ingestion/` | **completa** |
+| Generador de datos ambientales | `src/generator/` | **completa** |
 
 ---
 
@@ -104,33 +105,40 @@ Navegador ── index.html + viewer.js ◄── API :8000 (sirve la página y 
      `send_file`, que igual entiende rangos.
 
 6. **[src/api/api.py](../src/api/api.py), solo las partes del visor.**
-   - Línea 125: `app.mount("/viewer", ...)` sirve la carpeta `web/` como
+   - Línea 139: `app.mount("/viewer", ...)` sirve la carpeta `web/` como
      página.
-   - `root` (línea 202): abrir `localhost:8000` manda al visor.
-   - `get_spaces` (línea 208): la ruta `/spaces`, que le da al visor la dirección
+   - `root` (línea 333): abrir `localhost:8000` manda al visor.
+   - `get_spaces` (línea 339): la ruta `/spaces`, que le da al visor la dirección
      del servidor de escaneos, la lista de pisos y los salones con su última
      lectura.
 
 7. **[web/index.html](../web/index.html).** La página. Las líneas 16 a 27
    cargan la librería Potree y lo que necesita; la línea 30 es el área donde
-   se dibuja la nube; desde la 34, el panel de la derecha (pisos, chat y el
-   panel oculto de medir salones). Al final carga `viewer.js`.
+   se dibuja la nube; la 34 es el borde que se arrastra para cambiar el
+   ancho del panel, y desde la 36 viene el panel de la derecha (pisos, chat y
+   el panel oculto de medir salones). Al final carga `viewer.js`.
 
 8. **[web/viewer.js](../web/viewer.js).** El cliente, como tu cliente WebGL:
-   - Arriba (líneas 11 a 30): constantes, entre ellas `SURVEY_MODE`, que
-     solo vale verdadero si la dirección termina en `?medir`.
-   - `main` (línea 55): pide `/spaces`, carga los pisos y dibuja marcadores.
-   - `loadFloors` (línea 78): para cada piso revisa que exista su
+   - Arriba (líneas 11 a 55): constantes, entre ellas `SURVEY_MODE`, que
+     solo vale verdadero si la dirección termina en `?medir`, y `state`.
+   - `main` (línea 73): muestra la bienvenida, pide `/spaces`, carga los
+     pisos y dibuja marcadores.
+   - `loadFloors` (línea 97): para cada piso revisa que exista su
      `metadata.json`, lo carga con `Potree.loadPointCloud`, lo agrega a la
      escena y crea su casilla para mostrarlo u ocultarlo.
-   - `showOnlyFloor` / `showAllFloors` (líneas 120 y 129): lo que pasa cuando
+   - `showOnlyFloor` / `showAllFloors` (líneas 139 y 148): lo que pasa cuando
      el chat responde sobre un piso o sobre el edificio.
-   - `drawMarkers` (línea 156): pone una etiqueta por salón con marcador
+   - `drawMarkers` (línea 175): pone una etiqueta por salón con marcador
      (hoy ninguno tiene).
-   - El bloque de la línea 199: el chat. Manda la pregunta a `/chat`, muestra
+   - El bloque de la línea 218: el chat. Manda la pregunta a `/chat`, muestra
      la respuesta y la línea de abajo ("lectura actual • piso 2").
-   - `setupSurvey` (línea 285): el panel de medir salones; solo corre con
+     `showWelcome` (línea 268) pone la bienvenida de `/welcome` al abrir.
+   - `setupSurvey` (línea 321): el panel de medir salones; solo corre con
      `?medir`.
+   - `setupResizer` (línea 392): arrastrar el borde izquierdo del panel
+     cambia su ancho (entre 280 px y el 60% de la ventana; doble clic lo
+     regresa a 360). El ancho se guarda en el navegador. Potree mide su área
+     en cada cuadro, así que la nube se acomoda sola.
 
 ### Preguntas para comprobar
 
@@ -416,7 +424,13 @@ misma pregunta siempre siga el mismo camino.
 
 **Respuestas directas.** Cuando no hay datos que redactar (un saludo, algo
 fuera de tema, un salón que no existe o que no tiene sensor, una pregunta que
-no dice dónde), el código contesta con frases fijas y Llama ni se entera.
+no dice dónde), el código contesta con frases fijas y Llama ni se entera. La
+bienvenida del chat también es del código.
+
+**Preguntas sobre las etiquetas.** "¿Qué significa estimado?" la redacta
+Llama a partir de hechos fijos, y el código la revisa antes de mostrarla:
+números que no están en los hechos, juicios como "no es confiable", o un sí
+o un no al principio. Si falla, se muestran los hechos tal cual.
 
 **Dos prompts.** El de sistema son las reglas fijas (máximo 3 oraciones, solo
 los datos recibidos, con unidades). El de usuario lleva la pregunta y los
@@ -436,7 +450,7 @@ servidores Flask.
 "¿Cómo va a estar el piso 3 en una hora?"
    │
    ├─ classifier.classify          tipo forecast, piso 3, horizonte 60 min
-   ├─ api._target_and_data         ¿salón? ¿número desconocido? ¿piso? ¿edificio? ¿charla?
+   ├─ api._target_and_data         ¿qué significa? ¿salón? ¿número desconocido? ¿piso? ¿edificio? ¿charla?
    ├─ retrieval.floor_data         GRU salón por salón, más promedio, mínimo y máximo
    ├─ context.build_prompt         como es un piso, lo escribe floor_prompt.prompt
    ├─ llm_client.generate_answer   Llama escribe una o dos oraciones
@@ -448,47 +462,71 @@ servidores Flask.
 
 1. **[src/api/api.py](../src/api/api.py).** Es como tu servidor Flask: la
    aplicación y sus rutas.
-   - `Question` y `Answer` (líneas 55 y 61): lo que manda y recibe el visor.
-   - `_target_and_data` (línea 131): el ruteo. Lee los `if` en orden: salón,
-     número desconocido, piso, edificio, charla, y al final "¿de qué salón?".
-   - `chat` (línea 284): la cadena completa de una pregunta.
+   - `Question` y `Answer` (líneas 60 y 66): lo que manda y recibe el visor.
+   - `_moment` (línea 145): el momento de la pregunta: la última lectura, o
+     la fecha y hora que nombra. `_named_day` (línea 181) decide qué martes
+     es "el martes", según el tiempo del verbo.
+   - `_target_and_data` (línea 235): el ruteo. Lee los `if` en orden: qué
+     significa una etiqueta, salón, número desconocido, piso, edificio,
+     charla, y al final "¿de qué salón?".
+   - `_glossary_data` y `_explained` (líneas 295 y 324): una pregunta sobre
+     una etiqueta. El primero junta los hechos y el prompt; el segundo le
+     pide la redacción a Llama y la revisa.
+   - `welcome` (línea 442): la ruta `/welcome`, el primer mensaje del chat.
+   - `chat` (línea 493): la cadena completa de una pregunta.
 
 2. **[src/llm/classifier.py](../src/llm/classifier.py)** y
    **[src/llm/vocabulary.py](../src/llm/vocabulary.py).**
-   - `classify` (línea 92): junta todo en un `Intent`.
-   - `_detect_kind` (línea 175): la prioridad anomalía > pronóstico > historial
+   - `classify` (línea 121): junta todo en un `Intent`.
+   - `_detect_kind` (línea 282): la prioridad anomalía > pronóstico > historial
      > actual.
-   - `_extract_space`, `_extract_floor` y `_extract_horizon` (líneas 241, 256
-     y 310): el salón, el piso y los minutos.
-   - `_detect_chat` (línea 140): saludo, agradecimiento o fuera de tema.
+   - `_extract_space`, `_extract_floor` y `_extract_horizon` (líneas 348, 363
+     y 518): el salón, el piso y los minutos.
+   - `_detect_chat` (línea 252): saludo, agradecimiento o fuera de tema.
+   - `_extract_terms` (línea 176): por qué etiqueta pregunta ("estimado",
+     "simulado"…). Basta la etiqueta si no hay lugar ni datos; si los hay,
+     también una forma de preguntar ("qué significa", "por qué").
    - `vocabulary.py` son solo las listas de palabras; ahí se agregan
      sinónimos.
 
 3. **[src/api/retrieval.py](../src/api/retrieval.py).** De dónde salen los
    números.
-   - `STATE` (línea 46) y `space_rows` (línea 58): la única función que
+   - `STATE` (línea 55) y `space_rows` (línea 67): la única función que
      cambia cuando llegue la base de datos del Tec (`TODO E5`).
+   - `rows_between` (línea 96): las filas de un periodo, del sensor si midió
+     algo ahí, si no del generador; nunca mezcladas.
    - `current_data`, `history_data`, `anomaly_data` y `forecast_data`
-     (líneas 96, 120, 154 y 208): un salón.
-   - `floor_data` (línea 289): un piso o el edificio; `_floor_summary` (línea
-     402) calcula el promedio y los extremos.
+     (líneas 167, 192, 236 y 297): un salón en un momento.
+   - [src/api/floors.py](../src/api/floors.py): `floor_data` (línea 35), un
+     piso o el edificio; `_floor_summary` (línea 196) calcula el promedio y
+     los extremos.
 
 4. **[src/llm/context.py](../src/llm/context.py).** Los prompts de un salón.
    `SYSTEM_PROMPT` (línea 41) son las reglas; `build_prompt` (línea 57) elige
    qué prompt armar.
 
 5. **[src/llm/floor_prompt.py](../src/llm/floor_prompt.py).** El prompt de un
-   piso (`prompt`, línea 59) y el detalle por salón (`detail`, línea 227).
+   piso (`prompt`, línea 60) y el detalle por salón (`detail`, línea 234).
 
 6. **[src/llm/formatting.py](../src/llm/formatting.py).** Cómo se escriben los
    números. `threshold_notes` (línea 129) pone las etiquetas "ALTO" o "por
-   encima del rango de confort"; `trend` (línea 202) escribe "sube 62.8 ppm";
-   `anomaly` escribe cada anomalía que encontró el detector.
+   encima del rango de confort"; `trend` (línea 247) escribe "sube 62.8 ppm";
+   `date_span` (línea 191) escribe "del 2 al 11 de octubre"; `anomaly` escribe
+   cada anomalía que encontró el detector.
 
 7. **[src/llm/replies.py](../src/llm/replies.py).** Las frases fijas.
-   `TEMPLATES` (línea 38) trae las plantillas; `reply` (línea 91) escoge una
+   `TEMPLATES` (línea 37) trae las plantillas; `reply` (línea 113) escoge una
    de las versiones con un hash de la pregunta, así que la misma pregunta
    recibe siempre la misma frase.
+   - [src/llm/glossary.py](../src/llm/glossary.py): qué quieren decir
+     "medido", "simulado" y "estimado". `WELCOME` (línea 163) es la
+     bienvenida; `DEFINITIONS` (línea 37) y `SPACE_STATUS` (línea 93) son los
+     hechos de "¿qué significa estimado?" y "¿por qué el 3201 sale
+     estimado?"; `SYSTEM_PROMPT` (línea 134), las reglas y los ejemplos para
+     Llama, y `grounded` (línea 239), la revisión de lo que escribió. Los
+     datos que citan los hechos (salones con sensor, fechas, error típico)
+     los junta [src/api/origins.py](../src/api/origins.py): `facts` (línea
+     28) y `space_status` (línea 54).
 
 8. **[src/llm/llm_client.py](../src/llm/llm_client.py).** El POST a Ollama
    (`generate_answer`, línea 56) y la revisión de que esté encendido
@@ -522,8 +560,94 @@ servidores Flask.
 5. Cuando llegue la base de datos del Tec, ¿qué función cambias?
 
 Respuestas: 1) "No puedo responder ahora mismo." seguido de la razón; se
-decide en `chat`, en el `except RuntimeError` (línea 302 de `api.py`). 2)
+decide en `chat`, en el `except RuntimeError` (línea 513 de `api.py`). 2)
 Porque las palabras de edificio se buscan como palabras completas, con
 `_contains_word`. 3) `llm/vocabulary.py`: se agrega a
 `VARIABLE_SYNONYMS["temperature"]`. 4) El código: `formatting.trend`. 5)
 `space_rows`, en `api/retrieval.py`.
+
+---
+
+## Generador de datos ambientales
+
+### Las ideas
+
+**Caja gris.** Cada variable tiene una ecuación con estructura física (sección
+4.4.2) y parámetros que salen de las lecturas de los salones con sensor. La
+ecuación dice *por qué* cambia la variable; los datos dicen *cuánto*.
+
+**Un archivo por ecuación.** `co2.py` es el balance de masa, `humidity.py` el
+mismo en humedad absoluta, `temperature.py` el modelo empírico, `light.py` el
+de estados y `motion.py` el del sensor de movimiento. Todos tienen las mismas
+tres partes: `calibrate` (sacar los parámetros de un salón), `step` (avanzar
+5 minutos) y `main` (compararse contra lo medido).
+
+**N(t) compartida.** Las cinco ecuaciones leen la misma ocupación. Cuando
+empieza una clase, todas reaccionan al mismo tiempo, como en los datos reales.
+
+**ε.** Lo que la ecuación no explica, como un proceso lento con media propia
+(un AR(1)). En el CO₂ es sobre todo la deriva del sensor MOX.
+
+**El agente.** `RoomGenerator` guarda el estado de un salón (el CO₂, la humedad,
+si las lámparas están encendidas, el ε de cada variable) y lo avanza con
+`step()`, igual que un agente de Mesa.
+
+### Cómo viaja todo
+
+```
+horario ─► occupancy.py ─► N(t) ─┐
+datos limpios ───────────────────┼─► inputs.room_grid ─► co2 / humidity / temperature / light / motion .calibrate
+clima (Open-Meteo) ──────────────┘                                │
+                                                                  ▼
+                                       calibrate.py ─► models/generator_params.json
+                                       (propios, o el promedio de su tipo)
+                                                                  │
+                         generate.py ─► RoomGenerator.step() × cada 5 min ─► datos con origen "simulado"/"estimado"
+                         validate.py ─► dejando un salón fuera, contra lo medido
+```
+
+### Orden de lectura
+
+1. **[src/generator/occupancy.py](../src/generator/occupancy.py).**
+   `Occupancy.students` (línea 78) da los alumnos de un salón a cada hora;
+   `empty_days` (línea 109) encuentra los bloques que los sensores vieron
+   vacíos.
+2. **[src/generator/co2.py](../src/generator/co2.py).** `decay_fits` (línea
+   108) busca las caídas y `_fit_decay` (línea 142) les ajusta la
+   exponencial; `calibrate` (línea 71) saca λ, C_ext y g; `step` (línea 167)
+   es la ecuación de un paso.
+3. **[src/generator/noise.py](../src/generator/noise.py).** `fit` (línea 36)
+   y `step` (línea 69): el AR(1) de ε.
+4. **[src/generator/humidity.py](../src/generator/humidity.py),
+   [temperature.py](../src/generator/temperature.py),
+   [light.py](../src/generator/light.py) y
+   [motion.py](../src/generator/motion.py).** La misma forma que `co2.py`. En
+   `light.py`, `next_state` (línea 175) es la cadena de Markov de las lámparas.
+5. **[src/generator/room.py](../src/generator/room.py).** `RoomGenerator.step`
+   (línea 60): las cinco ecuaciones juntas.
+6. **[src/generator/calibrate.py](../src/generator/calibrate.py).**
+   `calibrate_all` (línea 132) decide, espacio por espacio, si usa sus
+   parámetros, los de su tipo, o no se genera.
+7. **[src/generator/generate.py](../src/generator/generate.py)** y
+   **[validate.py](../src/generator/validate.py).** Generar fechas y validar.
+8. **[src/api/sources.py](../src/api/sources.py).** Donde el generador se
+   conecta con el chat: carga el semestre generado y dice, con
+   `provenance` (línea 105), de qué salones sale un valor generado y su error
+   típico. `retrieval.rows_between` decide cuándo usarlo.
+
+### Preguntas para comprobar
+
+1. ¿Por qué la humedad no tiene su propia λ?
+2. Si mañana le pones sensor al 3201, ¿qué tienes que correr para que el
+   generador lo use con sus propios parámetros?
+3. ¿Por qué el generador no genera las salas de juntas?
+4. ¿De dónde sale que el 3206 casi no tiene luz natural?
+5. ¿Se puede evaluar el GRU con datos del generador?
+
+Respuestas: 1) Porque es el mismo aire el que saca el CO₂ y el vapor: un
+salón tiene un solo caudal. 2) Agregar el sensor a `config/sensors.csv`,
+volver a limpiar los datos y correr `python -m generator.calibrate`. 3)
+Porque ninguna tiene sensor: no hay nada de qué sacar sus parámetros. 4) De
+`daylight_factor` en `light.py`: la mediana de luz/radiación de sus fines de
+semana da k = 3. 5) No: mediría qué tan bien imita las ecuaciones, no el
+edificio.

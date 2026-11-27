@@ -35,6 +35,10 @@ REAL_DATA = PROCESSED_DATA / "aulas3.parquet"
 # Outdoor weather for the same period, written by ingestion.weather.
 WEATHER_DATA = PROCESSED_DATA / "weather.parquet"
 
+# The generator's output, written by generator.generate. The API answers from
+# it wherever the sensors have no reading: other dates, rooms without sensor.
+GENERATED_DATA = PROCESSED_DATA / "generated.parquet"
+
 # Shared space registry: names for the classifier, floor clouds and markers
 # for the viewer.
 SPACES_FILE = ROOT / "config" / "spaces.json"
@@ -111,6 +115,12 @@ PHYSICAL_LIMITS = {
 #
 # Reference: docs/hallazgos_robod.md
 BINARY = {"motion"}
+
+# --- Semester --------------------------------------------------------------
+# What the generator covers and the dates a question can ask about: Semana
+# Tec 1 to the end of period 3. The first period is ignored.
+SEMESTER_START = "2026-09-14"
+SEMESTER_END = "2026-12-06"
 
 # --- Time windows ----------------------------------------------------------
 INTERVAL_SECONDS = 300  # data aggregated to 5-minute buckets

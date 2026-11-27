@@ -20,8 +20,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Floor prompts and number formatting moved to their own
-    files; the anomaly prompt reads the 3-sigma detector.
+    2026-11-26 - Generated values (simulated or estimated) are labelled in
+    every prompt of one space.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -66,8 +66,8 @@ def build_prompt(intent: Intent, data: dict) -> tuple[str, str]:
         A tuple of (system prompt, user prompt).
     """
     if data.get("scope") in ("floor", "building"):
-        user = floor_prompt.prompt(intent, data)
-    elif intent.kind == "forecast":
+        return SYSTEM_PROMPT, floor_prompt.prompt(intent, data)
+    if intent.kind == "forecast":
         user = _prompt_forecast(intent, data)
     elif intent.kind == "history":
         user = _prompt_history(intent, data)
@@ -75,6 +75,8 @@ def build_prompt(intent: Intent, data: dict) -> tuple[str, str]:
         user = _prompt_anomaly(intent, data)
     else:
         user = _prompt_current(intent, data)
+    if data.get("origin") in ORIGIN_HEADINGS:
+        user = _with_origin(user, data)
     return SYSTEM_PROMPT, user
 
 
@@ -145,8 +147,7 @@ def _prompt_forecast(intent: Intent, data: dict) -> str:
         f"ESTADO ACTUAL del espacio {data.get('space', 'desconocido')}:",
         fmt.readings({v: current[v] for v in variables if v in current}),
         "",
-        f"PREDICCIÓN DEL GRU (método {data.get('method', 'directo')}, "
-        f"horizonte {data.get('horizon_min', '?')} min):",
+        _forecast_heading(data),
         "\n".join(lines) if lines else "  Sin datos de predicción.",
     ]
     if data.get("warning"):
@@ -157,6 +158,14 @@ def _prompt_forecast(intent: Intent, data: dict) -> str:
         "sube, baja o se mantiene.",
     ]
     return "\n".join(parts)
+
+
+def _forecast_heading(data: dict) -> str:
+    """Name what produced the forecast: the GRU, or the generator's rows ahead."""
+    horizon = data.get("horizon_min", "?")
+    if data.get("method") == "generador":
+        return f"PRONÓSTICO DEL GENERADOR (horario y clima de esas horas, horizonte {horizon} min):"
+    return f"PREDICCIÓN DEL GRU (método {data.get('method', 'directo')}, horizonte {horizon} min):"
 
 
 def _prompt_history(intent: Intent, data: dict) -> str:
@@ -245,6 +254,50 @@ def _prompt_anomaly(intent: Intent, data: dict) -> str:
         "falla del sensor. Si no las hay, dilo sin exagerar.",
     ]
     return "\n".join(parts)
+
+
+# How the prompt names each generated origin, and what it must say about it.
+ORIGIN_HEADINGS = {
+    "estimado": "{why} Estos valores son ESTIMADOS por el generador físico, "
+                "calibrado con los salones {rooms}; no son mediciones.",
+    "simulado": "EL SENSOR DEL {space} NO MIDIÓ ESE MOMENTO. Estos valores son SIMULADOS "
+                "por el generador físico, calibrado con las lecturas del propio {rooms}; "
+                "no son mediciones.",
+}
+
+
+def _with_origin(user: str, data: dict) -> str:
+    """Wrap a prompt built from generated rows with what makes them generated.
+
+    The heading goes right after the question and the expected error at the
+    end, so the same three prompts serve measured and generated data. The
+    API also appends a note written by the code, so the label is there even
+    if the model drops it.
+
+    Args:
+        user: The prompt as built for measured data.
+        data: The retrieved data, with "origin", "based_on" and
+            "expected_error".
+
+    Returns:
+        The wrapped prompt.
+    """
+    origin = data["origin"]
+    question, rest = user.split("\n\n", 1)
+    space = data.get("space", "desconocido")
+    why = f"EL SENSOR DEL {space} NO TIENE DATOS SUFICIENTES." if data.get("has_sensor")         else f"EL ESPACIO {space} NO TIENE SENSOR."
+    heading = ORIGIN_HEADINGS[origin].format(space=space, why=why, rooms=", ".join(data.get("based_on", [])))
+    error = fmt.expected_error(data.get("expected_error"))
+    adjective = "estimados" if origin == "estimado" else "simulados"
+    return "\n".join([
+        question,
+        "",
+        heading,
+        rest,
+        "",
+        f"ERROR TÍPICO DE ESTOS VALORES: {error}.",
+        f"Di en la primera oración que son valores {adjective}, no medidos.",
+    ])
 
 
 def _milestones(predictions: list[dict]) -> list[dict]:

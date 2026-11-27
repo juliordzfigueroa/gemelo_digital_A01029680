@@ -8,7 +8,7 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Moved here from classifier.py.
+    2026-11-27 - Words for asking what the labels of an answer mean.
 
 Reference:
     Section 4.3.4 of the research document.
@@ -63,6 +63,43 @@ HORIZON_PHRASES = [
     ("una hora", 60), ("1 hora", 60),
     ("media hora", 30),
 ]
+
+# --------------------------------------------------------------------------
+# When: a date and a time of day
+# --------------------------------------------------------------------------
+MONTHS = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+    "julio": 7, "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10,
+    "noviembre": 11, "diciembre": 12,
+    "ene": 1, "feb": 2, "abr": 4, "jun": 6, "jul": 7, "ago": 8, "sep": 9,
+    "sept": 9, "oct": 10, "nov": 11, "dic": 12,
+}
+
+# Words after the hour that move it to the afternoon: "a las 5 de la tarde".
+AFTERNOON_WORDS = ["pm", "p.m.", "de la tarde", "de la noche"]
+
+WEEKDAYS = {
+    "lunes": 0, "martes": 1, "miércoles": 2, "miercoles": 2, "jueves": 3,
+    "viernes": 4, "sábado": 5, "sabado": 5, "domingo": 6,
+}
+
+# "El martes pasado" and "el próximo martes" pick the week; without them, the
+# tense of the question does (see api._moment).
+LAST_WEEK_WORDS = ["pasado"]
+NEXT_WEEK_WORDS = ["próximo", "proximo", "que viene", "siguiente"]
+
+# Days counted from the present, longest first so "pasado mañana" is found
+# before "mañana". "Mañana" alone is tomorrow; after "la" it is the morning.
+RELATIVE_DAYS = [
+    ("pasado mañana", 2), ("anteayer", -2), ("antier", -2),
+    ("ayer", -1), ("hoy", 0), ("mañana", 1),
+]
+
+# A part of the day, when the question gives no hour: "el martes en la tarde".
+DAY_PARTS = {
+    "en la mañana": 10, "por la mañana": 10, "al mediodía": 12, "al mediodia": 12,
+    "en la tarde": 16, "por la tarde": 16, "en la noche": 20, "por la noche": 20,
+}
 
 # --------------------------------------------------------------------------
 # Which variables
@@ -133,4 +170,55 @@ OUT_OF_SCOPE_WORDS = [
     "quién es", "quien es", "programa", "código", "codigo", "tarea", "ensayo",
     "opinas", "opinión", "opinion", "chatgpt", "noticias", "película",
     "pelicula", "fútbol", "futbol", "hace en",
+]
+
+# --------------------------------------------------------------------------
+# Questions about the labels under an answer
+# --------------------------------------------------------------------------
+# A question that names one of these labels and asks what it means ("¿qué
+# significa que un salón esté estimado?", "¿por qué el 3201 sale
+# estimado?") gets its definition, from llm/glossary.py. Matched as whole
+# words, with one slip allowed in the long ones ("esimado").
+TERM_WORDS = {
+    "medido": ["medido", "medidos"],
+    "simulado": [
+        "simulado", "simulados", "simulada", "simuladas", "simulación",
+        "simulacion", "simular", "simula", "simulan",
+    ],
+    "estimado": [
+        "estimado", "estimados", "estimada", "estimadas", "estimación",
+        "estimacion", "estimaciones", "estimar", "estima", "estiman",
+    ],
+    "mixto": ["mixto", "mixtos", "medidos y estimados", "simulados y estimados"],
+    "error": [
+        "error típico", "error tipico", "margen de error", "error", "confiable",
+        "preciso", "precisa", "precisión", "precision", "creer", "confiar",
+    ],
+    "generador": ["generador", "generado", "generados", "generada", "generadas"],
+    "gru": ["gru", "red neuronal"],
+}
+
+# Labels that need no "qué significa" when the question names no place and
+# asks for no data: "¿qué pasa si un salón está estimado?", "no entiendo lo
+# de simulado" can only be about the label. "error" is left out: "me salió
+# un error" is not about the typical error. It still counts next to one of
+# these: "¿le puedo creer a lo estimado?" gets both.
+STANDALONE_TERMS = ["medido", "simulado", "estimado", "mixto", "generador", "gru"]
+
+# Asking about every label at once: "¿qué significan las etiquetas?".
+ALL_TERMS_WORDS = ["etiqueta", "etiquetas", "término", "termino", "términos", "terminos"]
+
+# Ways of asking what something means, or why an answer says it.
+MEANING_WORDS = [
+    "significa", "significan", "significado", "quiere decir", "quieren decir",
+    "se refiere", "se refieren", "qué es", "que es", "qué son", "que son",
+    "por qué", "por que", "porque", "diferencia", "explica", "explícame",
+    "explicame", "de dónde sale", "de donde sale", "de dónde salen",
+    "de donde salen", "de dónde viene", "de donde viene", "de dónde vienen",
+    "de donde vienen", "cómo se calcula", "como se calcula", "cómo se estima",
+    "como se estima", "cómo se simula", "como se simula", "cómo funciona",
+    "como funciona", "qué pasa", "que pasa", "implica", "implican",
+    "no entiendo", "no le entiendo", "confiable", "qué tan confiable",
+    "que tan confiable", "qué tan preciso", "que tan preciso", "qué tan bueno",
+    "que tan bueno",
 ]

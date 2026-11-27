@@ -12,9 +12,9 @@ else.
 
 Where each step lives: llm/classifier.py reads the question, api/retrieval.py
 fetches the data, llm/context.py and llm/floor_prompt.py write the prompt,
-llm/llm_client.py talks to Ollama, and llm/replies.py holds every sentence the
-code writes on its own. This file only routes between them and serves the
-viewer.
+llm/llm_client.py talks to Ollama, and llm/replies.py and llm/glossary.py
+hold every sentence the code writes on its own. This file only routes between
+them and serves the viewer.
 
 Usage, from the src/ directory:
     uvicorn api.api:app --port 8000
@@ -23,9 +23,8 @@ Author:
     Julio César Rodríguez Figueroa (A01029680)
 
 Last modified:
-    2026-11-26 - Retrieval moved to api/retrieval.py; removed the space_id
-    field of the request, which no client sends since the viewer dropped
-    its space selector.
+    2026-11-27 - The welcome of the chat, and answers to what the labels
+    "medido", "simulado" and "estimado" mean, written by Llama and checked.
 
 Reference:
     Sections 4.3.1 to 4.3.4 of the research document.
@@ -34,6 +33,9 @@ Reference:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
+
+from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI
@@ -41,12 +43,15 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from api import floors, origins
 from api import retrieval as ret
+from api import sources as src
 from common import config as cfg
 from common import data as dat
 from common import spaces
 from gru import predict as pred
-from llm import classifier, context, floor_prompt, llm_client, replies
+from llm import classifier, context, floor_prompt, glossary, llm_client, replies
+from llm import formatting as fmt
 
 
 # --------------------------------------------------------------------------
@@ -69,6 +74,8 @@ class Answer(BaseModel):
     horizon_min: int | None = None
     forecast_method: str | None = None
     warning: str | None = None
+    origin: str | None = None  # medido, simulado, estimado, mixto or generado; None for a fixed reply
+    moment: str | None = None  # the date and time asked about, when the question named one
 
 
 # --------------------------------------------------------------------------
@@ -109,6 +116,13 @@ async def lifespan_handler(app: FastAPI):
         data = pd.DataFrame(columns=[cfg.TIME_COLUMN, cfg.SPACE_COLUMN, *cfg.ACTIVE_VARIABLES])
         print(f"ADVERTENCIA: sin datos: {e}")
     ret.STATE["data"] = data
+
+    reason = src.load()
+    if reason:
+        print(f"Sin datos del generador: {reason}")
+    else:
+        first, last = src.covered()
+        print(f"Datos del generador: {first:%Y-%m-%d} a {last:%Y-%m-%d}")
     yield
 
 
@@ -128,18 +142,114 @@ if cfg.VIEWER_DIR.is_dir():
 # --------------------------------------------------------------------------
 # Routing
 # --------------------------------------------------------------------------
-def _target_and_data(intent: classifier.Intent) -> tuple[int | None, int | None, dict]:
-    """Decide what the answer is about, and fetch it.
+def _moment(intent: classifier.Intent) -> tuple[pd.Timestamp, pd.Timestamp, bool]:
+    """The moment a question is about, and the start of its history period.
 
-    Order of precedence: a space named in the text, an unknown room number,
-    a floor, the whole building. Several outcomes need no LLM at all and come
-    back as a "direct" sentence: a room without a sensor, an unknown room, a
-    message that is not a question about the building, or a question that
-    does not say where. A fixed sentence there is both faster and safer than
-    asking the model to explain an absence.
+    Without a date, a weekday or a time it is the latest measured reading, as
+    always. The day comes from a date ("3 de noviembre"), a day counted from
+    the present ("ayer") or a weekday ("el martes"); the time from the hour
+    or the part of the day. A day without a time is noon for the present
+    state and the whole day for a history question; today without a time is
+    simply now.
 
     Args:
         intent: The classified question.
+
+    Returns:
+        A tuple of (moment, start of the history period, whether the
+        question named the moment).
+    """
+    now = ret.latest_time()
+    day = _named_day(intent, now.date())
+    if day is None and intent.at_time is None:
+        return now, now - pd.Timedelta(hours=ret.HISTORY_HOURS), False
+
+    day = day or now.date()
+    start = pd.Timestamp(day)
+    if intent.at_time is not None:
+        at = pd.Timestamp(datetime.combine(day, intent.at_time))
+    elif intent.kind == "history":
+        end_of_day = start + pd.Timedelta(days=1) - ret.STEP
+        return min(end_of_day, now) if day == now.date() else end_of_day, start, True
+    elif day == now.date():
+        at = now
+    else:
+        at = start + pd.Timedelta(hours=12)
+    return at, at - pd.Timedelta(hours=ret.HISTORY_HOURS), True
+
+
+def _named_day(intent: classifier.Intent, today) -> "datetime.date | None":
+    """The calendar day a question names, counted from today when relative.
+
+    Which week a bare weekday falls in follows the tense: a question about
+    the future ("¿cómo estará el martes?") means the next Tuesday, anything
+    else the last one, today included. "Pasado" and "próximo" override it.
+
+    Args:
+        intent: The classified question.
+        today: The day of the latest measured reading.
+
+    Returns:
+        The day, or None when the question names none.
+    """
+    if intent.on_day is not None:
+        return intent.on_day
+    if intent.day_offset is not None:
+        return today + pd.Timedelta(days=intent.day_offset).to_pytimedelta()
+    if intent.weekday is None:
+        return None
+
+    back = (today.weekday() - intent.weekday) % 7
+    ahead = (intent.weekday - today.weekday()) % 7
+    if intent.week == "last":
+        back = back or 7
+    elif intent.week == "next":
+        return today + pd.Timedelta(days=ahead or 7).to_pytimedelta()
+    elif intent.kind == "forecast":
+        return today + pd.Timedelta(days=ahead).to_pytimedelta()
+    return today - pd.Timedelta(days=back).to_pytimedelta()
+
+
+def _resolve(question: str) -> tuple[classifier.Intent, pd.Timestamp, pd.Timestamp, bool]:
+    """Classify a question and settle what moment it is about.
+
+    A question naming a moment is answered as the state at that moment, even
+    if it was worded as a forecast ("¿cómo estará el 10 de noviembre?"),
+    since that state is already what the generator holds for that date; the
+    returned intent says so, and the viewer labels it as a reading.
+
+    Args:
+        question: The question as typed.
+
+    Returns:
+        A tuple of (intent, moment, start of the history period, whether the
+        question named the moment).
+    """
+    intent = classifier.classify(question)
+    at, since, named = _moment(intent)
+    if named and intent.kind == "forecast":
+        intent = replace(intent, kind="current")
+    return intent, at, since, named
+
+
+def _target_and_data(
+    intent: classifier.Intent, at: pd.Timestamp, since: pd.Timestamp
+) -> tuple[int | None, int | None, dict]:
+    """Decide what the answer is about, and fetch it.
+
+    Order of precedence: a question about what a label means, a space named
+    in the text, an unknown room number, a floor, the whole building. A
+    question about a label comes back as "explain", for Llama to word and the
+    code to check. Several outcomes need no LLM at all and come back as a
+    "direct" sentence: a space with neither a sensor nor an estimate, an
+    unknown room, no data for the moment asked about, an anomaly question
+    about a generated value, a message that is not a question about the
+    building, or a question that does not say where.
+
+    Args:
+        intent: The classified question, from _resolve().
+        at: The moment of the question.
+        since: Start of the period of a history question.
 
     Returns:
         The space id (None unless the answer is about one space), the floor
@@ -149,12 +259,22 @@ def _target_and_data(intent: classifier.Intent) -> tuple[int | None, int | None,
     question = intent.original_text
     space = intent.space_id
 
+    if intent.terms:
+        return None, None, _glossary_data(intent, space)
+
     if space is not None:
-        if ret.space_rows(space).empty:
-            label = str(spaces.labels().get(space, space))
+        measured = not ret.space_rows(space).empty
+        label = str(spaces.labels().get(space, space))
+        if not measured and src.generated_rows(space).empty:
             text = replies.no_sensor(label, spaces.aliases(space), ret.rooms_with_data(), question)
             return space, None, {"direct": text}
-        return space, None, ret.retrieve(intent, space)
+        if not measured and intent.kind == "anomaly":
+            text = replies.reply("estimate_no_anomaly", question, subject=replies.capitalized(label))
+            return space, None, {"direct": text}
+        data = ret.retrieve(intent, space, at, since)
+        if data.get("origin") is None and not data.get("error") and data.get("state") != "unavailable":
+            return space, None, {"direct": _no_data_message(space, label, question)}
+        return space, None, data
 
     if intent.unknown_room:
         text = replies.unknown_room(
@@ -162,14 +282,80 @@ def _target_and_data(intent: classifier.Intent) -> tuple[int | None, int | None,
         )
         return None, None, {"direct": text}
     if intent.floor is not None:
-        return None, intent.floor, ret.floor_data(intent, intent.floor)
+        return None, intent.floor, floors.floor_data(intent, intent.floor, at, since)
     if intent.building:
-        return None, None, ret.floor_data(intent, None)
+        return None, None, floors.floor_data(intent, None, at, since)
     if intent.chat:
         return None, None, {"direct": replies.reply(intent.chat, question)}
     # A building question that does not say where. Answering about a default
     # space would report on a room the user never asked about.
     return None, None, {"direct": replies.reply("ask_target", question)}
+
+
+def _glossary_data(intent: classifier.Intent, space: int | None) -> dict:
+    """The facts and prompts for a question about what a label means.
+
+    Args:
+        intent: The classified question, with its terms.
+        space: The space it names, or None.
+
+    Returns:
+        {"direct": the facts, which are the answer if Llama cannot be used,
+         "explain": the prompts for Llama, the facts to check its answer
+         against and the line the code adds after it}.
+    """
+    facts = origins.facts()
+    # "¿por qué el 3201 sale estimado?": the definition, and what that space
+    # gets, when the question names one.
+    status, values = origins.space_status(space) if space is not None else (None, {})
+    facts_text = glossary.explain(intent.terms, facts, status, **values)
+    system, user = glossary.prompt(intent.original_text, facts_text)
+    return {
+        "direct": facts_text,
+        "explain": {
+            "system": system,
+            "user": user,
+            "facts": facts_text,
+            "note": glossary.note(intent.terms, facts, status),
+        },
+    }
+
+
+def _explained(data: dict) -> str:
+    """Llama's answer about a label, checked; the facts as they are if it fails.
+
+    Args:
+        data: From _glossary_data().
+
+    Returns:
+        Llama's sentences followed by the code's line, or the facts when
+        Ollama is off or Llama wrote a number that is not in them.
+    """
+    explain = data["explain"]
+    try:
+        text = llm_client.generate_answer(explain["system"], explain["user"])
+    except RuntimeError:
+        return data["direct"]
+    if not glossary.grounded(text, explain["facts"]):
+        return data["direct"]
+    if not explain["note"]:
+        return text
+    return f"{text.rstrip()}\n\n{explain['note']}"
+
+
+def _no_data_message(space: int, label: str, question: str) -> str:
+    """Say there is nothing for that moment, and which dates there are for that space."""
+    measured = ret.space_rows(space)[cfg.TIME_COLUMN]
+    generated = src.generated_rows(space)
+    measured_span = fmt.date_span(measured.min(), measured.max()) if len(measured) else "nada"
+    generated_span = "nada"
+    if not generated.empty:
+        times = generated[cfg.TIME_COLUMN]
+        generated_span = fmt.date_span(times.min(), times.max())
+    return replies.reply(
+        "no_data_moment", question, of_subject=replies.of_label(label),
+        measured=measured_span, generated=generated_span,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -195,6 +381,7 @@ def health() -> dict:
         "rows_in_memory": 0 if data is None else int(len(data)),
         "data_source": str(cfg.REAL_DATA.name),
         "anomaly_detector": "3sigma" if ret.STATE["normalizer"] is not None else "unavailable",
+        "generated_rows": 0 if src.STATE["generated"] is None else int(len(src.STATE["generated"])),
     }
 
 
@@ -215,9 +402,13 @@ def get_spaces() -> dict:
     """
     registry = spaces.read()
     labels = spaces.labels()
+    now = ret.latest_time()
     output = []
     for space in registry["spaces"]:
-        current = ret.current_data(int(space["space_id"]))
+        current = ret.current_data(int(space["space_id"]), now)
+        if current["origin"] != "medido":
+            # This lists what the sensors read; estimates are for the chat.
+            current = {"timestamp": None, "readings": {}}
         output.append({
             "space_id": space["space_id"],
             "name": space["name"],
@@ -247,6 +438,17 @@ def get_registry() -> dict:
     return spaces.read()
 
 
+@app.get("/welcome")
+def welcome() -> dict:
+    """Return the first message of the chat, which the viewer shows when it opens.
+
+    Returns:
+        {"response": what the assistant answers and what the labels under an
+        answer mean, with the rooms and dates of the data loaded}.
+    """
+    return {"response": glossary.welcome(origins.facts())}
+
+
 @app.post("/context")
 def context_for(question: Question) -> dict:
     """Run the chain up to the prompt, without calling the LLM.
@@ -261,10 +463,12 @@ def context_for(question: Question) -> dict:
     Returns:
         The classified intent, the retrieved data and both prompts.
     """
-    intent = classifier.classify(question.question)
-    space, floor, data = _target_and_data(intent)
+    intent, at, since, named = _resolve(question.question)
+    space, floor, data = _target_and_data(intent, at, since)
     system, user = None, None
-    if not data.get("direct"):
+    if data.get("explain"):
+        system, user = data["explain"]["system"], data["explain"]["user"]
+    elif not data.get("direct"):
         system, user = context.build_prompt(intent, data)
 
     return {
@@ -275,7 +479,9 @@ def context_for(question: Question) -> dict:
             "floor": floor,
             "building": data.get("scope") == "building",
             "chat": intent.chat,
+            "terms": intent.terms,
             "horizon_min": intent.horizon_min,
+            "moment": str(at) if named else None,
         },
         "data": data,
         "system_prompt": system,
@@ -294,8 +500,10 @@ def chat(question: Question) -> Answer:
         The generated sentence plus the routing decisions that produced it, so
         the viewer can show what the answer was based on.
     """
-    intent = classifier.classify(question.question)
-    space, floor, data = _target_and_data(intent)
+    intent, at, since, named = _resolve(question.question)
+    space, floor, data = _target_and_data(intent, at, since)
+    if data.get("explain"):
+        return Answer(response=_explained(data), intent_type=intent.kind)
     if data.get("direct"):
         return Answer(response=data["direct"], intent_type=intent.kind, space=space)
 
@@ -308,9 +516,15 @@ def chat(question: Question) -> Answer:
         # missing than by an error the viewer has to interpret.
         response = f"No puedo responder ahora mismo. {e}"
     else:
-        # A floor answer: the model wrote the summary, the code adds the
-        # room-by-room detail.
+        # The code adds what the model must not be trusted with: the
+        # room-by-room detail of a floor, or the label of an estimate.
         detail = floor_prompt.detail(data) if data.get("scope") else ""
+        if not data.get("scope") and data.get("origin") in ("simulado", "estimado"):
+            detail = replies.origin_note(
+                data["origin"], data["space"], spaces.aliases(space), data["based_on"],
+                fmt.expected_error(data["expected_error"]), question.question,
+                has_sensor=data.get("has_sensor", False),
+            )
         if detail:
             response = f"{response.rstrip()}\n\n{detail}"
 
@@ -324,4 +538,6 @@ def chat(question: Question) -> Answer:
         horizon_min=data.get("horizon_min") if is_forecast else None,
         forecast_method=data.get("method") if is_forecast else None,
         warning=data.get("warning") or data.get("error") or data.get("detail"),
+        origin=data.get("origin"),
+        moment=str(at) if named else None,
     )
