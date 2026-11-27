@@ -176,24 +176,34 @@ OUT_OF_SCOPE_WORDS = [
 # Questions about the labels under an answer
 # --------------------------------------------------------------------------
 # A question that names one of these labels and asks what it means ("¿qué
-# significa que un salón esté estimado?") gets its definition, written by
-# llm/glossary.py. It needs both: "¿cómo está el 3201 estimado?" asks for the
-# estimate, not for a definition. Matched as whole words, even when the
-# question names a space: "¿por qué el 3201 sale estimado?".
+# significa que un salón esté estimado?", "¿por qué el 3201 sale
+# estimado?") gets its definition, from llm/glossary.py. Matched as whole
+# words, with one slip allowed in the long ones ("esimado").
 TERM_WORDS = {
     "medido": ["medido", "medidos"],
-    "simulado": ["simulado", "simulados", "simulada", "simuladas", "simulación", "simulacion"],
+    "simulado": [
+        "simulado", "simulados", "simulada", "simuladas", "simulación",
+        "simulacion", "simular", "simula", "simulan",
+    ],
     "estimado": [
         "estimado", "estimados", "estimada", "estimadas", "estimación",
-        "estimacion", "estimaciones",
+        "estimacion", "estimaciones", "estimar", "estima", "estiman",
     ],
     "mixto": ["mixto", "mixtos", "medidos y estimados", "simulados y estimados"],
     "error": [
         "error típico", "error tipico", "margen de error", "error", "confiable",
-        "preciso", "precisa", "precisión", "precision",
+        "preciso", "precisa", "precisión", "precision", "creer", "confiar",
     ],
     "generador": ["generador", "generado", "generados", "generada", "generadas"],
+    "gru": ["gru", "red neuronal"],
 }
+
+# Labels that need no "qué significa" when the question names no place and
+# asks for no data: "¿qué pasa si un salón está estimado?", "no entiendo lo
+# de simulado" can only be about the label. "error" is left out: "me salió
+# un error" is not about the typical error. It still counts next to one of
+# these: "¿le puedo creer a lo estimado?" gets both.
+STANDALONE_TERMS = ["medido", "simulado", "estimado", "mixto", "generador", "gru"]
 
 # Asking about every label at once: "¿qué significan las etiquetas?".
 ALL_TERMS_WORDS = ["etiqueta", "etiquetas", "término", "termino", "términos", "terminos"]
@@ -204,6 +214,11 @@ MEANING_WORDS = [
     "se refiere", "se refieren", "qué es", "que es", "qué son", "que son",
     "por qué", "por que", "porque", "diferencia", "explica", "explícame",
     "explicame", "de dónde sale", "de donde sale", "de dónde salen",
-    "de donde salen", "cómo se calcula", "como se calcula", "qué tan confiable",
-    "que tan confiable", "qué tan preciso", "que tan preciso",
+    "de donde salen", "de dónde viene", "de donde viene", "de dónde vienen",
+    "de donde vienen", "cómo se calcula", "como se calcula", "cómo se estima",
+    "como se estima", "cómo se simula", "como se simula", "cómo funciona",
+    "como funciona", "qué pasa", "que pasa", "implica", "implican",
+    "no entiendo", "no le entiendo", "confiable", "qué tan confiable",
+    "que tan confiable", "qué tan preciso", "que tan preciso", "qué tan bueno",
+    "que tan bueno",
 ]
