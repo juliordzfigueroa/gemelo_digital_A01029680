@@ -13,9 +13,9 @@ Julio César Rodríguez Figueroa — A01029680
 |---|---|---|
 | **GRU** | Predice CO₂, temperatura, humedad, luz y movimiento hasta 2 h adelante | listo |
 | **SARIMAX** | Baseline estadístico contra el que se compara el GRU | listo |
-| **LLM** | Llama 3.1 8B vía Ollama: redacta respuestas con los datos del GRU | listo; con fallas de redacción conocidas |
-| **API** | FastAPI: recibe la pregunta, consulta al GRU, le pide la frase al LLM | lista, con datos reales limpios |
-| **Visor** | Potree en el navegador: un escaneo por piso, marcadores por salón y chat | listo; faltan los marcadores de los salones y corregir la altura entre pisos |
+| **LLM** | Llama 3.1 8B vía Ollama: redacta las respuestas con los datos que le da el código, y explica qué quiere decir "medido", "simulado" y "estimado" | listo; con fallas de redacción conocidas. En las explicaciones, el código revisa lo que escribe |
+| **API** | FastAPI: recibe la pregunta, busca los datos (sensores, GRU o generador), le pide la frase al LLM | lista, con datos reales limpios y el semestre generado |
+| **Visor** | Potree en el navegador: un escaneo por piso, marcadores por salón y chat con bienvenida; el panel se ensancha arrastrando su borde | listo; faltan los marcadores de los salones y corregir la altura entre pisos |
 | **Servidor de escaneos** | Sirve las nubes convertidas, aparte de la API | listo |
 | **Detector de anomalías** | Regla 3σ sobre la última lectura; el chat la usa en las preguntas de anomalía | listo; no detecta sensores atascados (medido) |
 | **Generador** | Modelos de caja gris por variable: estima los salones sin sensor y simula el semestre; el chat responde con él por cualquier fecha | listo para salones; validado dejando uno fuera |
@@ -268,7 +268,7 @@ para ver a Llama) y el navegador. Ollama
 no necesita consola: corre como servicio de Windows.
 
 ```
-Navegador (visor) ──► API :8000 ──► clasifica la pregunta ──► GRU (pronóstico) o última lectura
+Navegador (visor) ──► API :8000 ──► clasifica la pregunta ──► lectura, GRU (pronóstico) o generador
                          │                                 └─► Llama vía Ollama redacta la respuesta
                          └── nubes de puntos ◄── servidor de escaneos :8100
 ```
@@ -338,15 +338,29 @@ Para correr Ollama **en** esa consola en lugar de como servicio: cierra el
 `ollama serve`. Lo que Llama recibe exactamente (el prompt) no sale en este
 registro; para verlo está `POST /context` en [localhost:8000/docs](http://localhost:8000/docs).
 
-**Navegador:** [localhost:8000](http://localhost:8000). Pregunta nombrando
-el salón, por ejemplo "¿cómo está el CO₂ del 3308?" (lectura actual) o "¿cómo
-va a estar el CO₂ del 3308 en 30 minutos?" (pronóstico del GRU). Si no nombras
-salón ni piso, te pregunta cuál. También por piso:
-"¿cómo está el piso 3?" responde con un resumen del piso y después salón por
-salón, y deja visible solo ese piso; "todos los salones" hace lo mismo con el
-edificio completo. Bajo cada respuesta aparece qué tipo de
-pregunta detectó, el salón o piso y, si hubo pronóstico, el método. Todo lo
-que se le puede preguntar, y lo que todavía no, está en
+**Navegador:** [localhost:8000](http://localhost:8000). El chat empieza con
+una bienvenida: qué se le puede preguntar y qué quieren decir las etiquetas de
+las respuestas. Pregunta nombrando el salón, por ejemplo "¿cómo está el CO₂
+del 3308?" (lectura actual) o "¿cómo va a estar el CO₂ del 3308 en 30
+minutos?" (pronóstico del GRU). Si no nombras salón ni piso, te pregunta cuál.
+También por piso: "¿cómo está el piso 3?" responde con un resumen del piso y
+después salón por salón, y deja visible solo ese piso; "todos los salones" hace
+lo mismo con el edificio completo. Se puede preguntar por cualquier momento
+del semestre ("¿cómo estuvo el 3308 el martes a las 10?") y por salones sin
+sensor ("¿cómo está el 3201?").
+
+Bajo cada respuesta aparece qué tipo de pregunta detectó, el salón o piso, el
+momento si nombraste uno, el método si hubo pronóstico, y de dónde salen los
+valores cuando no son lecturas: **simulado** (el salón tiene sensor, pero no
+midió ese momento), **estimado** (no tiene sensor) o, en un piso, **medidos y
+estimados** (**simulados y estimados** si ningún sensor midió ese momento).
+Lo simulado y lo estimado los calcula el generador, no el GRU. Si una
+etiqueta no queda clara, pregúntale: "¿qué significa estimado?", "¿por qué el
+3201 sale estimado?".
+
+El panel de la derecha se ensancha o se angosta arrastrando su borde
+izquierdo; doble clic lo regresa al ancho original, y el navegador recuerda el
+ancho. Todo lo que se le puede preguntar, y lo que todavía no, está en
 [src/llm/README.md](src/llm/README.md#qué-se-le-puede-preguntar). Para apagar,
 `Ctrl+C` en cada consola.
 
@@ -445,7 +459,8 @@ desde ahí:
 - `POST /context` muestra la intención detectada, los datos y el prompt que
   recibiría Llama. **No necesita Ollama.**
 - `POST /chat` devuelve la respuesta redactada por Llama. Necesita Ollama
-  corriendo.
+  corriendo; sin él, las preguntas sobre las etiquetas ("¿qué significa
+  estimado?") responden con el texto fijo y las demás dicen qué falta.
 
 Con un cuerpo como:
 
@@ -453,9 +468,12 @@ Con un cuerpo como:
 {"question": "¿Cómo va a estar el CO2 del 3308 en una hora?"}
 ```
 
-Los salones con datos son 3206, 3208, 3305 y 3308. Para comprobar desde la
-terminal que la API está arriba: `Invoke-RestMethod http://localhost:8000/health`
-en PowerShell, `curl http://localhost:8000/health` en Git Bash.
+Los salones con sensor son 3206, 3208, 3305 y 3308; los demás salones de
+clase de los pisos 0 a 3 responden con la estimación del generador, si se
+generó el semestre (consola 2 de [Arrancar el sistema](#arrancar-el-sistema)). Para
+comprobar desde la terminal que la API está arriba:
+`Invoke-RestMethod http://localhost:8000/health` en PowerShell,
+`curl http://localhost:8000/health` en Git Bash.
 
 Para preguntas, usa `/docs` o el visor: desde la terminal los acentos de la
 pregunta se corrompen con facilidad.
@@ -470,8 +488,8 @@ python -m scans.server
 
 Con la API corriendo, abre [localhost:8000](http://localhost:8000). La línea
 bajo el título dice cuántos pisos cargó; los que no están convertidos aparecen
-como "sin convertir". Pregunta en el panel nombrando un salón o un piso: la
-pregunta va a `/chat`. Detalle en
+como "sin convertir". El chat abre con la bienvenida de `/welcome`. Pregunta
+en el panel nombrando un salón o un piso: la pregunta va a `/chat`. Detalle en
 [Arrancar el sistema](#arrancar-el-sistema).
 
 ---
@@ -501,6 +519,7 @@ uvicorn api.api:app --port 8000
 | `GET /health` | Estado del GRU, de los datos y de Ollama |
 | `POST /chat` | Pregunta en lenguaje natural, respuesta redactada por Llama |
 | `POST /context` | Lo mismo **sin** llamar a Llama: devuelve el prompt |
+| `GET /welcome` | El primer mensaje del chat: qué se le puede preguntar y qué quieren decir las etiquetas, con los salones con sensor y el error típico tomados de los datos |
 | `GET /spaces` | Pisos, salones con marcador y dimensiones, y la última lectura de cada uno; lo usa el visor |
 | `GET /spaces/registry` | `config/spaces.json` tal cual, para la descarga del visor |
 | `GET /viewer/` | La página del visor (`/` redirige aquí) |
@@ -514,6 +533,8 @@ Qué está conectado y qué no:
 | Clasificación de la pregunta y prompts | real |
 | Fuente de datos | archivo limpio `aulas3.parquet`; la base de datos del Tec queda pendiente (`TODO E5` en `api/retrieval.py`) |
 | Detector de anomalías | regla 3σ con la media y sigma del entrenamiento; distingue "no encontró nada" de "no se pudo revisar" |
+| Generador | el semestre generado (`data/processed/generated.parquet`): responde por fechas que los sensores no midieron y por salones sin sensor, siempre marcado como simulado o estimado |
+| Preguntas sobre las etiquetas | Llama redacta a partir de hechos del código; el código revisa números, juicios y respuestas de sí o no, y si algo falla usa el texto fijo |
 
 Diseño de esta capa en [src/llm/README.md](src/llm/README.md).
 
@@ -620,8 +641,9 @@ falta CORS. `scans.server` hace las dos cosas.
 Separar la nube por salón es difícil, así que cada salón se representa con un
 **marcador** (un punto) y sus **dimensiones**, guardados en
 `config/spaces.json`. El marcador pone en la escena una etiqueta con el número
-del salón y sus lecturas; las dimensiones dan el volumen *V* que usa el
-balance de masa del CO₂ del generador físico. Se miden en el mismo visor,
+del salón y sus lecturas; las dimensiones quedan registradas, pero el
+generador no las usa: el Tec no tiene los volúmenes de todos los salones, así
+que calibra parámetros efectivos con las lecturas. Se miden en el mismo visor,
 con un panel que **no aparece en la vista normal** para no confundir a quien
 solo quiere preguntar: se abre con
 [localhost:8000/viewer/?medir](http://localhost:8000/viewer/?medir).
@@ -717,6 +739,9 @@ python -m generator.generate                           # el semestre completo, d
 | Errores de CORS en la consola del navegador | La dirección del visor no está en `VIEWER_ORIGINS` del servidor de escaneos |
 | El visor carga pero la nube nunca aparece | Se sirve con un servidor sin soporte de Range; usa `scans.server` |
 | Los pisos no quedan encimados | Se convirtieron los LAS originales y no los de `D:\las_A3_alineado` (paso 2 de Escaneos y visor) |
+| Un salón sin sensor dice "todavía no tiene sensor" | Falta generar el semestre: los tres comandos del generador en la consola 2 de [Arrancar el sistema](#arrancar-el-sistema). Si ya está, es un tipo de espacio que nunca se midió (salas de juntas, laboratorios) |
+| "¿Qué significa estimado?" responde con un texto largo y formal | Es el texto fijo: Ollama no respondió, o el código rechazó lo que redactó Llama (un número que no estaba en los hechos, un juicio). `POST /context` muestra los hechos y el prompt |
+| El chat no muestra la bienvenida, o la muestra vieja | Recarga sin caché (`Ctrl+F5`) y revisa que la API se haya reiniciado después de actualizar |
 
 ---
 
@@ -747,8 +772,8 @@ src/gru/          modelo, entrenamiento y predicción
 src/sarimax/      baseline estadístico
 src/anomaly/      detector de anomalías 3σ y su evaluación
 src/generator/    generador de datos ambientales: una ecuación por archivo
-src/llm/          clasificador y vocabulario, prompts, frases fijas, cliente de Ollama
-src/api/          orquestador FastAPI y recuperación de datos; también sirve el visor
+src/llm/          clasificador y vocabulario, prompts, frases fijas, glosario de etiquetas, cliente de Ollama
+src/api/          orquestador FastAPI y recuperación de datos (sensores o generador); también sirve el visor
 src/scans/        alineación y conversión de escaneos, servidor de nubes
 web/              página del visor Potree (la librería, en web/potree/, no se versiona)
 src/compare_models.py   GRU contra SARIMAX
